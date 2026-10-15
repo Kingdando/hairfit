@@ -15,11 +15,11 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 const colors = {
-  rose: '#A94F67',
-  ink: '#292326',
-  muted: '#BDAEB2',
+  rose: '#397A24',
+  ink: '#24251F',
+  muted: '#E6F8C5',
   white: '#FFFFFF',
-  dark: '#171315',
+  dark: '#25430D',
 };
 
 type FaceScanScreenProps = {
@@ -45,9 +45,8 @@ export function FaceScanScreen({ onBack, onCaptured }: FaceScanScreenProps) {
 
     if (!result.canceled) {
       const asset = result.assets[0];
-      const mimeType = ['image/jpeg', 'image/png', 'image/webp'].includes(asset.mimeType || '') ? asset.mimeType : 'image/jpeg';
       if (!asset.base64) return Alert.alert('Photo could not be read', 'Please choose another JPG, PNG, or WebP photo.');
-      onCaptured({ uri: asset.uri, imageData: `data:${mimeType};base64,${asset.base64}` });
+      onCaptured({ uri: asset.uri, imageData: `data:image/jpeg;base64,${asset.base64}` });
     }
   };
 
@@ -176,17 +175,17 @@ const styles = StyleSheet.create({
   shellWeb: { maxWidth: '100%', alignSelf: 'stretch' },
   safe: { flex: 1 },
   header: { height: 70, paddingHorizontal: 16, flexDirection: 'row', alignItems: 'center', backgroundColor: colors.dark },
-  headerButton: { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center', backgroundColor: '#2A2427' },
+  headerButton: { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center', backgroundColor: '#397A24' },
   headerCopy: { flex: 1, alignItems: 'center' },
   headerTitle: { color: colors.white, fontSize: 17, fontWeight: '800' },
   headerSubtitle: { color: colors.muted, fontSize: 11, marginTop: 2 },
   secureIcon: { width: 42, height: 42, alignItems: 'center', justifyContent: 'center' },
-  preview: { flex: 1, overflow: 'hidden', backgroundColor: '#292326' },
+  preview: { flex: 1, overflow: 'hidden', backgroundColor: '#24251F' },
   previewShade: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(16,12,14,0.14)' },
   guideArea: { ...StyleSheet.absoluteFillObject, paddingTop: 28, paddingBottom: 148, alignItems: 'center', justifyContent: 'space-between' },
   statusPill: { height: 34, paddingHorizontal: 13, borderRadius: 17, flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: 'rgba(20,16,18,0.72)' },
-  statusDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#D4A746' },
-  statusDotReady: { backgroundColor: '#64B68B' },
+  statusDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#8BCF35' },
+  statusDotReady: { backgroundColor: '#8BCF35' },
   statusText: { color: colors.white, fontSize: 12, fontWeight: '700' },
   faceGuide: { width: 230, height: 306, maxHeight: '68%', borderRadius: 115, borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.9)', backgroundColor: 'rgba(255,255,255,0.025)', overflow: 'hidden' },
   guideCorner: cornerBase,
@@ -203,10 +202,10 @@ const styles = StyleSheet.create({
   shutterInner: { width: 62, height: 62, borderRadius: 31, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.rose },
   pressed: { opacity: 0.78, transform: [{ scale: 0.97 }] },
   disabled: { opacity: 0.48 },
-  permissionState: { flex: 1, paddingHorizontal: 34, alignItems: 'center', justifyContent: 'center', backgroundColor: '#FFF8F6' },
-  permissionIcon: { width: 92, height: 92, borderRadius: 46, alignItems: 'center', justifyContent: 'center', backgroundColor: '#F7E4E8', marginBottom: 24 },
+  permissionState: { flex: 1, paddingHorizontal: 34, alignItems: 'center', justifyContent: 'center', backgroundColor: '#FFFFFF' },
+  permissionIcon: { width: 92, height: 92, borderRadius: 46, alignItems: 'center', justifyContent: 'center', backgroundColor: '#E6F8C5', marginBottom: 24 },
   permissionTitle: { color: colors.ink, fontSize: 23, fontWeight: '800', marginBottom: 10 },
-  permissionBody: { color: '#7C7074', fontSize: 14, lineHeight: 22, textAlign: 'center', marginBottom: 24 },
+  permissionBody: { color: '#397A24', fontSize: 14, lineHeight: 22, textAlign: 'center', marginBottom: 24 },
   permissionButton: { width: '100%', minHeight: 54, borderRadius: 16, paddingHorizontal: 18, flexDirection: 'row', gap: 9, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.rose },
   permissionButtonText: { color: colors.white, fontSize: 15, fontWeight: '800' },
   galleryChoice: { minHeight: 50, paddingHorizontal: 18, flexDirection: 'row', gap: 8, alignItems: 'center', justifyContent: 'center' },

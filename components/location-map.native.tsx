@@ -40,7 +40,7 @@ export function LocationMap({ coordinate, salons = [], onSelectSalon }: Location
         showsMyLocationButton={false}
         style={StyleSheet.absoluteFill}
         toolbarEnabled={false}>
-        <Marker coordinate={coordinate} pinColor="#A94F67" title="You are here" />
+        <Marker coordinate={coordinate} pinColor="#397A24" title="You are here" />
         {salons.map((salon) => {
           const initials = salon.name
             .split(/\s+/)
@@ -69,7 +69,7 @@ export function LocationMap({ coordinate, salons = [], onSelectSalon }: Location
         accessibilityRole="button"
         onPress={recenter}
         style={({ pressed }) => [styles.recenterButton, pressed && styles.pressed]}>
-        <Ionicons name="locate" size={22} color="#A94F67" />
+        <Ionicons name="locate" size={22} color="#397A24" />
       </Pressable>
     </View>
   );
@@ -88,7 +88,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: '#EDE3E5',
+    borderColor: '#DCEBC8',
     shadowColor: '#000000',
     shadowOpacity: 0.14,
     shadowRadius: 8,
@@ -101,7 +101,7 @@ const styles = StyleSheet.create({
     borderRadius: 15,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#A94F67',
+    backgroundColor: '#397A24',
     borderWidth: 3,
     borderColor: '#FFFFFF',
     shadowColor: '#000000',

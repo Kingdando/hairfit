@@ -16,6 +16,7 @@ export type Salon = {
   rating: number;
   opening_time: string | null;
   closing_time: string | null;
+  hairstyleMatchType?: 'exact' | 'general';
 };
 
 export type SalonService = {
@@ -81,6 +82,7 @@ export type UserProfile = AuthUser & {
   hairType: string | null;
   hairLength: string | null;
   hairTexture: string | null;
+  stylePreference: 'men' | 'women' | null;
   faceShape: string | null;
 };
 type AuthResponse = { data: { user: AuthUser; token: string } };
@@ -101,13 +103,23 @@ export type AccountItem = { id: number; title: string; detail?: string; destinat
 export type PrivacySettings = { notificationsEnabled: boolean; saveScanHistory: boolean };
 export type FaceAnalysis = {
   faceShape: 'oval' | 'round' | 'square' | 'heart' | 'oblong' | 'diamond';
-  stylePreference: 'men';
+  stylePreference: 'men' | 'women';
   confidence: number;
   imageSize: { width: number; height: number };
   landmarks: { x: number; y: number; z: number }[];
   measurements: { lengthToWidth: number; jawToCheek: number; foreheadToCheek: number };
   recommendations: { name: string; score: number; reason: string; audience: 'women' | 'men' }[];
 };
+export type HairScalpAnalysis = {
+  hairType: string;
+  hairLength: string;
+  hairTexture: string;
+  visibleScalpObservations: string;
+  careTips: string[];
+  whenToSeekProfessional: string;
+  disclaimer: string;
+};
+export type HairstyleSuggestion = FaceAnalysis['recommendations'][number];
 export type OwnerDashboard = {
   id: number;
   name: string;
@@ -225,7 +237,28 @@ async function apiPost<T>(path: string, body: object): Promise<T> {
   return result as T;
 }
 
-export async function signup(input: { fullName: string; email: string; phone: string; password: string; role: 'customer' | 'owner'; salonName?: string; salonAddress?: string; salonCity?: string; latitude?: number; longitude?: number; salonLogoData?: string }) {
+export async function analyzeHairAndScalp(imageData: string) {
+  const result = await apiPost<{ success: boolean; analysis: HairScalpAnalysis }>(
+    '/api/ai-hair-scalp-analysis',
+    { imageData },
+  );
+  return result.analysis;
+}
+
+export async function requestHairstyleSuggestions(
+  faceShape: FaceAnalysis['faceShape'],
+  measurements: FaceAnalysis['measurements'],
+  request: string,
+  stylePreference: 'men' | 'women' = 'men',
+) {
+  const result = await apiPost<{ success: boolean; suggestions: HairstyleSuggestion[] }>(
+    '/api/ai-hairstyle-suggestions',
+    { faceShape, measurements, request, stylePreference },
+  );
+  return result.suggestions;
+}
+
+export async function signup(input: { fullName: string; email: string; phone: string; password: string; role: 'customer' | 'owner'; stylePreference?: 'men' | 'women'; salonName?: string; salonAddress?: string; salonCity?: string; latitude?: number; longitude?: number; salonLogoData?: string }) {
   return (await apiPost<AuthResponse>('/api/auth/signup', input)).data;
 }
 
@@ -253,11 +286,11 @@ export async function updateProfile(token: string, input: { fullName: string; em
   return (result as { data: UserProfile }).data;
 }
 
-export async function analyzeFace(token: string, imageData: string) {
+export async function analyzeFace(token: string | null, imageData: string, stylePreference: 'men' | 'women' = 'men') {
   const response = await fetchApi('/api/face-analysis', {
     method: 'POST',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ imageData }),
+    headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ imageData, stylePreference }),
   });
   const result = await response.json().catch(() => null);
   if (!response.ok) throw new Error(result?.error || `Face analysis failed (${response.status})`);

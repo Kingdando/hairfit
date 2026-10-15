@@ -92,8 +92,8 @@ export function FaceScanScreen({ onBack, onCaptured }: FaceScanScreenProps) {
         const renderedHeight = video.videoHeight * scale;
         const offsetX = (width - renderedWidth) / 2;
         const offsetY = (height - renderedHeight) / 2;
-        context.fillStyle = '#70FFD7';
-        context.shadowColor = '#003C32';
+        context.fillStyle = '#8BCF35';
+        context.shadowColor = '#25430D';
         context.shadowBlur = 3;
         for (const point of landmarks) {
           context.beginPath();
@@ -235,20 +235,20 @@ const webStyles = {
 };
 
 const styles = StyleSheet.create({
-  shell: { flex: 1, width: '100%', backgroundColor: '#171315' },
+  shell: { flex: 1, width: '100%', backgroundColor: '#25430D' },
   safe: { flex: 1 },
-  header: { height: 70, paddingHorizontal: 16, flexDirection: 'row', alignItems: 'center', backgroundColor: '#171315' },
-  headerButton: { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center', backgroundColor: '#2A2427' },
+  header: { height: 70, paddingHorizontal: 16, flexDirection: 'row', alignItems: 'center', backgroundColor: '#25430D' },
+  headerButton: { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center', backgroundColor: '#397A24' },
   headerCopy: { flex: 1, alignItems: 'center' },
   headerTitle: { color: '#fff', fontSize: 17, fontWeight: '800' },
-  headerSubtitle: { color: '#BDAEB2', fontSize: 11, marginTop: 2 },
+  headerSubtitle: { color: '#DCEBC8', fontSize: 11, marginTop: 2 },
   secureIcon: { width: 42, height: 42, alignItems: 'center', justifyContent: 'center' },
-  preview: { flex: 1, overflow: 'hidden', backgroundColor: '#292326' },
+  preview: { flex: 1, overflow: 'hidden', backgroundColor: '#24251F' },
   guideArea: { ...StyleSheet.absoluteFillObject, paddingTop: 28, paddingBottom: 148, alignItems: 'center', justifyContent: 'space-between' },
   statusPill: { height: 34, paddingHorizontal: 13, borderRadius: 17, flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: 'rgba(20,16,18,0.72)' },
-  statusDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#D4A746' },
-  statusDotReady: { backgroundColor: '#64B68B' },
-  statusDotError: { backgroundColor: '#E16B6B' },
+  statusDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#8BCF35' },
+  statusDotReady: { backgroundColor: '#8BCF35' },
+  statusDotError: { backgroundColor: '#25430D' },
   statusText: { color: '#fff', fontSize: 12, fontWeight: '700' },
   faceGuide: { width: 230, height: 306, maxHeight: '68%', borderRadius: 115, borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.9)', backgroundColor: 'rgba(255,255,255,0.025)' },
   faceGuideHidden: { opacity: 0 },
@@ -258,6 +258,6 @@ const styles = StyleSheet.create({
   toolButton: { width: 64, height: 64, alignItems: 'center', justifyContent: 'center', gap: 5 },
   toolLabel: { color: '#fff', fontSize: 11, fontWeight: '600' },
   shutter: { width: 78, height: 78, borderRadius: 39, borderWidth: 4, borderColor: '#fff', alignItems: 'center', justifyContent: 'center' },
-  shutterInner: { width: 62, height: 62, borderRadius: 31, alignItems: 'center', justifyContent: 'center', backgroundColor: '#A94F67' },
+  shutterInner: { width: 62, height: 62, borderRadius: 31, alignItems: 'center', justifyContent: 'center', backgroundColor: '#397A24' },
   disabled: { opacity: 0.48 },
 });

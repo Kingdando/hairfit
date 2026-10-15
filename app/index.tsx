@@ -1,10 +1,12 @@
 import { Ionicons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as ImagePicker from "expo-image-picker";
 import * as Location from "expo-location";
 import * as Print from "expo-print";
 import * as Sharing from "expo-sharing";
 import { StatusBar } from "expo-status-bar";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { API_URL as FACEFIT_API_URL } from "@/services/api-config";
 import { FaceScanScreen } from "@/components/face-scan-screen";
 import { FaceLandmarkOverlay } from "@/components/face-landmark-overlay";
 import { CustomerDashboardScreen } from "@/components/dashboards/customer-dashboard-screen";
@@ -64,7 +66,11 @@ import {
   type SalonStaff,
   type UserProfile,
   analyzeFace,
+  analyzeHairAndScalp,
+  requestHairstyleSuggestions,
+  updateProfile,
   type FaceAnalysis,
+  type HairScalpAnalysis,
 } from "@/services/api";
 import {
   ActivityIndicator,
@@ -84,6 +90,7 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { isSalonOpenNow, salonStatusText } from "@/services/salon-hours";
 
 type Screen =
   | "splash"
@@ -169,6 +176,20 @@ type OwnerEditor =
       imageData?: string | null;
     };
 
+type ConfirmationPromptData = {
+  eyebrow: string;
+  title: string;
+  message: string;
+  icon: keyof typeof Ionicons.glyphMap;
+  showIcon?: boolean;
+  showEyebrow?: boolean;
+  centerTitle?: boolean;
+  confirmLabel: string;
+  cancelLabel: string;
+  onConfirm: () => void;
+  onCancel?: () => void;
+};
+
 async function chooseImage(context: string) {
   if (Platform.OS !== "web") {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -195,28 +216,39 @@ async function chooseImage(context: string) {
     );
     return null;
   }
-  const mimeType = ["image/jpeg", "image/png", "image/webp"].includes(
-    asset.mimeType || "",
-  )
-    ? asset.mimeType
-    : "image/jpeg";
-  return { uri: asset.uri, data: `data:${mimeType};base64,${asset.base64}` };
+  // Expo ImagePicker's base64 field contains JPEG bytes; the original asset
+  // MIME type can describe a different source format such as HEIC.
+  return { uri: asset.uri, data: `data:image/jpeg;base64,${asset.base64}` };
 }
 
 const C = {
-  rose: "#A94F67",
-  roseDark: "#743548",
-  blush: "#F7E4E8",
-  pale: "#FFF8F6",
-  ink: "#292326",
-  muted: "#7C7074",
-  line: "#EDE3E5",
+  rose: "#397A24",
+  roseDark: "#25430D",
+  blush: "#E6F8C5",
+  pale: "#F7FAF4",
+  ink: "#24251F",
+  muted: "#25430D",
+  line: "#DCEBC8",
   white: "#FFFFFF",
-  green: "#4F826B",
-  gold: "#C48B3A",
+  green: "#397A24",
+  gold: "#8BCF35",
 };
+// Bump this version when the consent terms materially change.
+const CONSENT_VERSION = 1;
+const consentStorageKey = (userId: number) => `facefit:consent:${userId}`;
+const HAIRSTYLE_WORDS = new Set("hair hairstyle haircut cut style styles fringe bang bangs bob pixie fade taper tapered layer layers layered curly curl curls wavy wave waves straight textured texture length short long medium undercut quiff crop braid braids ponytail bun shag mullet crew afro locs dreadlocks part volume low high mid skin side swept side-swept classic modern clean neat trim natural simple messy maintenance low-maintenance wolf butterfly curtain french caesar pompadour slicked back slicked-back mohawk faux hawk faux-hawk buzz crewcut crew-cut blowout shoulder shoulder-length chin chin-length mid-length blunt wispy asymmetrical black brown blonde gray red face shape round oval square heart diamond oblong".toLowerCase().split(/\s+/));
+const HAIRSTYLE_DESCRIPTORS = new Set("professional elegant edgy bold soft casual formal trendy stylish flattering suitable easy effortless low-maintenance lightweight thick thin fine dense natural youthful mature polished feminine masculine versatile office wedding daily everyday messy neat sharp subtle dramatic voluminous face facial features".split(/\s+/));
+const PROMPT_CONNECTORS = new Set("a an the with for me i want would like prefer need get looking look try please can you suggest recommend give show find that suits my keep it to and or but very more less of in on will without while as something make makes work good".split(/\s+/));
+function isValidHairstylePrompt(value: string) {
+  if (value.trim().length > 300 || !/^[a-z\s'.,!?-]+$/i.test(value.trim())) return false;
+  const words = value.toLowerCase().match(/[a-z]+(?:-[a-z]+)*/g) || [];
+  const relevantWordCount = words.filter((word) => HAIRSTYLE_WORDS.has(word) || HAIRSTYLE_DESCRIPTORS.has(word)).length;
+  const unknownWordCount = words.filter((word) => !HAIRSTYLE_WORDS.has(word) && !HAIRSTYLE_DESCRIPTORS.has(word) && !PROMPT_CONNECTORS.has(word)).length;
+  const unknownWordLimit = Math.max(1, Math.floor(words.length * 0.25));
+  return words.length >= 2 && relevantWordCount >= 2 && unknownWordCount <= unknownWordLimit;
+}
 const artwork = require("../assets/images/facefit-styles.png");
-const faceFitLogo = require("../assets/images/facefit-logo.png");
+const faceFitLogo = require("../assets/images/facefit-logo-green.png");
 const shapeCopy: Record<
   FaceAnalysis["faceShape"],
   { title: string; description: string }
@@ -327,6 +359,7 @@ function FavoriteIcon({
     </Animated.View>
   );
 }
+
 
 function FavoriteToast({
   toast,
@@ -488,6 +521,68 @@ function Header({
   );
 }
 
+function ConfirmationPrompt({
+  prompt,
+  onDismiss,
+}: {
+  prompt: ConfirmationPromptData | null;
+  onDismiss: () => void;
+}) {
+  if (!prompt) return null;
+  const confirm = () => {
+    onDismiss();
+    prompt.onConfirm();
+  };
+  const cancel = () => {
+    onDismiss();
+    prompt.onCancel?.();
+  };
+
+  return (
+    <Modal
+      visible
+      transparent
+      animationType="fade"
+      onRequestClose={onDismiss}
+      statusBarTranslucent={Platform.OS === "android"}
+    >
+      <Pressable style={s.promptBackdrop} onPress={onDismiss}>
+        <Pressable style={s.promptSheet} onPress={() => {}}>
+          {prompt.showIcon !== false && (
+            <View style={s.promptIcon}>
+              <Ionicons name={prompt.icon} size={24} color={C.rose} />
+            </View>
+          )}
+          {prompt.showEyebrow !== false && (
+            <Text style={s.promptEyebrow}>{prompt.eyebrow}</Text>
+          )}
+          <Text style={[s.promptTitle, prompt.centerTitle && s.promptTitleCentered]}>
+            {prompt.title}
+          </Text>
+          <Text style={s.promptMessage}>{prompt.message}</Text>
+          <View style={s.promptActions}>
+            <Pressable
+              accessibilityRole="button"
+              onPress={cancel}
+              style={({ pressed }) => [s.promptCancel, pressed && s.pressed]}
+            >
+              <Text style={s.promptCancelText}>{prompt.cancelLabel}</Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              onPress={confirm}
+              style={({ pressed }) => [s.promptConfirm, pressed && s.pressed]}
+            >
+              <Text style={s.promptConfirmText}>{prompt.confirmLabel}</Text>
+              <Ionicons name="arrow-forward" size={16} color={C.white} />
+            </Pressable>
+          </View>
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
+}
+
 function SectionTitle({
   title,
   action,
@@ -567,6 +662,7 @@ function Field({
   keyboardType?: "default" | "email-address" | "phone-pad" | "decimal-pad";
   autoCapitalize?: "none" | "sentences";
 }) {
+  const [showSecret, setShowSecret] = useState(false);
   return (
     <View style={s.field}>
       <Ionicons name={icon} size={19} color={C.muted} />
@@ -574,12 +670,26 @@ function Field({
         value={value}
         onChangeText={onChangeText}
         placeholder={placeholder}
-        placeholderTextColor="#A89DA0"
-        secureTextEntry={secure}
+        placeholderTextColor="#397A24"
+        secureTextEntry={secure && !showSecret}
         keyboardType={keyboardType}
         autoCapitalize={autoCapitalize}
         style={s.input}
       />
+      {secure && (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={showSecret ? "Hide password" : "Show password"}
+          hitSlop={10}
+          onPress={() => setShowSecret((visible) => !visible)}
+        >
+          <Ionicons
+            name={showSecret ? "eye-off-outline" : "eye-outline"}
+            size={20}
+            color={C.muted}
+          />
+        </Pressable>
+      )}
     </View>
   );
 }
@@ -667,9 +777,11 @@ function TabBar({ screen, go }: { screen: Screen; go: (x: Screen) => void }) {
 function ScreenFrame({
   children,
   scroll = true,
+  stickyHeader = true,
 }: {
   children: React.ReactNode;
   scroll?: boolean;
+  stickyHeader?: boolean;
 }) {
   const { width } = useWindowDimensions();
   const isWeb = Platform.OS === "web";
@@ -687,6 +799,7 @@ function ScreenFrame({
           <ScrollView
             contentContainerStyle={[s.scroll, isDesktopWeb && s.scrollDesktop]}
             showsVerticalScrollIndicator={false}
+            stickyHeaderIndices={stickyHeader ? [0] : undefined}
           >
             {children}
           </ScrollView>
@@ -728,7 +841,7 @@ function OwnerEditorField({
         value={value}
         onChangeText={onChangeText}
         placeholder={placeholder}
-        placeholderTextColor="#A89DA0"
+        placeholderTextColor="#397A24"
         keyboardType={keyboardType}
         multiline={multiline}
         secureTextEntry={secureTextEntry}
@@ -1166,7 +1279,7 @@ function OwnerEditorModal({
             )}
             {error && (
               <View style={s.authError}>
-                <Ionicons name="alert-circle" size={20} color="#81263A" />
+                <Ionicons name="alert-circle" size={20} color="#25430D" />
                 <Text style={s.authErrorText}>{error}</Text>
               </View>
             )}
@@ -1507,11 +1620,181 @@ function StaffPickerModal({
 }
 
 export default function FaceFitPrototype() {
+
+    // --- ADD THIS WITH YOUR OTHER STATE DECLARATIONS ---
+  const [aiPreviewImage, setAiPreviewImage] = useState<string | null>(null);
+  const [isGeneratingAi, setIsGeneratingAi] = useState<boolean>(false);
+  const [customHairstylePrompt, setCustomHairstylePrompt] = useState("");
+  const [customHairstyleSuggestions, setCustomHairstyleSuggestions] = useState<FaceAnalysis["recommendations"]>([]);
+  const [isSuggestingHairstyles, setIsSuggestingHairstyles] = useState(false);
+  const [customSuggestionPreviewImages, setCustomSuggestionPreviewImages] = useState<Record<string, string>>({});
+  const [customSuggestionPreviewLoading, setCustomSuggestionPreviewLoading] = useState<Record<string, boolean>>({});
+  const [activeCustomSuggestionIndex, setActiveCustomSuggestionIndex] = useState(0);
+  const [hairstylePreviewImages, setHairstylePreviewImages] = useState<Record<string, string>>({});
+  const [hairstylePreviewLoading, setHairstylePreviewLoading] = useState<Record<string, boolean>>({});
+  const [activeHairstyleIndex, setActiveHairstyleIndex] = useState(0);
+  const [hairScalpAnalysis, setHairScalpAnalysis] = useState<HairScalpAnalysis | null>(null);
+  const [isAnalyzingHairScalp, setIsAnalyzingHairScalp] = useState(false);
+  const [isHairScalpModalVisible, setIsHairScalpModalVisible] = useState(false);
+
+  const handleGenerateAiPreview = async (
+  itemToPreview?: FaceAnalysis["recommendations"][number]
+  ) => {
+    const targetRecommendation = itemToPreview || selectedRecommendation;
+    if (!targetRecommendation) return;
+
+    const imageBase64ToUse = uploadedImageData;
+
+    if (!imageBase64ToUse) {
+      Alert.alert("Missing Image", "Please capture or upload a face photo first.");
+      return;
+    }
+
+    setIsGeneratingAi(true);
+    setAiPreviewImage(null); // Clear previous preview while loading
+
+    try {
+      const response = await fetch(`${FACEFIT_API_URL}/api/ai-hairstyle-preview`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          imageBase64: imageBase64ToUse,
+          prompt: `Change only the hairstyle to a ${targetRecommendation.name}. Keep the user's facial features and face shape identical.`,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (data.success && data.imageUrl) {
+        setAiPreviewImage(data.imageUrl);
+      } else {
+        Alert.alert("Preview Error", data.error || "Failed to generate preview.");
+      }
+    } catch (error) {
+      Alert.alert("Network Error", "Check if backend server is running.");
+    } finally {
+      setIsGeneratingAi(false);
+    }
+  };
+  const generateMatchPreview = async (recommendation: FaceAnalysis["recommendations"][number]) => {
+    if (!uploadedImageData || hairstylePreviewImages[recommendation.name] || hairstylePreviewLoading[recommendation.name]) return;
+    setHairstylePreviewLoading((current) => ({ ...current, [recommendation.name]: true }));
+    try {
+      const response = await fetch(`${FACEFIT_API_URL}/api/ai-hairstyle-preview`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          imageBase64: uploadedImageData,
+          prompt: `Change only the hairstyle to a ${recommendation.name}. Keep the user's facial features and face shape identical.`,
+        }),
+      });
+      const data = await response.json();
+      if (data.success && data.imageUrl) {
+        setHairstylePreviewImages((current) => ({ ...current, [recommendation.name]: data.imageUrl }));
+      }
+    } catch {
+      // Leave the preview card in its retryable placeholder state if the service is unavailable.
+    } finally {
+      setHairstylePreviewLoading((current) => ({ ...current, [recommendation.name]: false }));
+    }
+  };
+  const generateCustomSuggestionPreview = async (recommendation: FaceAnalysis["recommendations"][number]) => {
+    if (!uploadedImageData || customSuggestionPreviewImages[recommendation.name] || customSuggestionPreviewLoading[recommendation.name]) return;
+    setCustomSuggestionPreviewLoading((current) => ({ ...current, [recommendation.name]: true }));
+    try {
+      const response = await fetch(`${FACEFIT_API_URL}/api/ai-hairstyle-preview`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          imageBase64: uploadedImageData,
+          prompt: `Change only the hairstyle to a ${recommendation.name}. Keep the user's facial features and face shape identical.`,
+        }),
+      });
+      const data = await response.json();
+      if (data.success && data.imageUrl) {
+        setCustomSuggestionPreviewImages((current) => ({ ...current, [recommendation.name]: data.imageUrl }));
+      }
+    } catch {
+      // Keep this suggestion retryable if preview generation fails.
+    } finally {
+      setCustomSuggestionPreviewLoading((current) => ({ ...current, [recommendation.name]: false }));
+    }
+  };
+  const handleAnalyzeHairScalp = async () => {
+    if (isGuestAccount || !authToken) {
+      setAuthError("Log in or create an account to unlock hair analysis and personalized care tips.");
+      setScreen("login");
+      return;
+    }
+    if (!uploadedImageData) {
+      Alert.alert("Photo needed", "Capture or upload a photo before analyzing your hair.");
+      return;
+    }
+    setIsHairScalpModalVisible(true);
+    setIsAnalyzingHairScalp(true);
+    setHairScalpAnalysis(null);
+    try {
+      const analysis = await analyzeHairAndScalp(uploadedImageData);
+      setHairScalpAnalysis(analysis);
+      if (authToken && userProfile) {
+        try {
+          const updatedProfile = await updateProfile(authToken, {
+            fullName: userProfile.fullName,
+            email: userProfile.email,
+            phone: userProfile.phone || "",
+            hairType: analysis.hairType.slice(0, 50),
+            hairLength: analysis.hairLength.slice(0, 50),
+            hairTexture: analysis.hairTexture.slice(0, 50),
+          });
+          setUserProfile(updatedProfile);
+        } catch {
+          Alert.alert("Analysis complete", "Your results are ready, but the hair profile could not be saved. Please try again later.");
+        }
+      }
+    } catch (error) {
+      setIsHairScalpModalVisible(false);
+      Alert.alert("Analysis unavailable", error instanceof Error ? error.message : "Please try again.");
+    } finally {
+      setIsAnalyzingHairScalp(false);
+    }
+  };
+  const handleRequestHairstyleSuggestions = async () => {
+    if (isGuestAccount) {
+      setAuthError("Log in or create an account to request custom hairstyle suggestions.");
+      setScreen("login");
+      return;
+    }
+    const request = customHairstylePrompt.trim();
+    if (!request || !faceAnalysis || isSuggestingHairstyles) return;
+    if (!isValidHairstylePrompt(request)) return;
+    setIsSuggestingHairstyles(true);
+    setCustomHairstyleSuggestions([]);
+    setCustomSuggestionPreviewImages({});
+    setCustomSuggestionPreviewLoading({});
+    setActiveCustomSuggestionIndex(0);
+    try {
+      const suggestions = await requestHairstyleSuggestions(
+        faceAnalysis.faceShape,
+        faceAnalysis.measurements,
+        request,
+        stylePreference,
+      );
+      setCustomHairstyleSuggestions(suggestions);
+      void Promise.all(suggestions.map((suggestion) => generateCustomSuggestionPreview(suggestion)));
+    } catch (error) {
+      Alert.alert("Suggestions unavailable", error instanceof Error ? error.message : "Please try a different description.");
+    } finally {
+      setIsSuggestingHairstyles(false);
+    }
+  };
   const { width } = useWindowDimensions();
   const isDesktopWeb = Platform.OS === "web" && width >= 900;
   const [screen, setScreen] = useState<Screen>("splash");
   const [faceAnalysisConsent, setFaceAnalysisConsent] = useState(false);
   const [locationConsent, setLocationConsent] = useState(false);
+  const [consentReturnScreen, setConsentReturnScreen] = useState<"login" | "signup">("signup");
+  const [consentSaving, setConsentSaving] = useState(false);
+  const [consentError, setConsentError] = useState<string | null>(null);
   const [isGettingLocation, setIsGettingLocation] = useState(false);
   const [mapVisible, setMapVisible] = useState(false);
   const [salonDetailReturn, setSalonDetailReturn] = useState<
@@ -1521,6 +1804,7 @@ export default function FaceFitPrototype() {
     null,
   );
   const [uploaded, setUploaded] = useState<string | null>(null);
+  const [uploadedImageData, setUploadedImageData] = useState<string | null>(null);
   const [faceAnalysis, setFaceAnalysis] = useState<FaceAnalysis | null>(null);
   const [selectedRecommendation, setSelectedRecommendation] = useState<
     FaceAnalysis["recommendations"][number] | null
@@ -1529,6 +1813,7 @@ export default function FaceFitPrototype() {
   const [styleSalonRecords, setStyleSalonRecords] = useState<Salon[] | null>(
     null,
   );
+  const [selectedSalonHairstyle, setSelectedSalonHairstyle] = useState<string | null>(null);
   const [selectedSalon, setSelectedSalon] = useState<Salon | null>(null);
   const [salonServices, setSalonServices] = useState<SalonService[]>([]);
   const [salonStaff, setSalonStaff] = useState<SalonStaff[]>([]);
@@ -1545,6 +1830,8 @@ export default function FaceFitPrototype() {
   const [salonsError, setSalonsError] = useState<string | null>(null);
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
   const [authToken, setAuthToken] = useState<string | null>(null);
+  const [isGuestAccount, setIsGuestAccount] = useState(false);
+  const [guestScanUsed, setGuestScanUsed] = useState(false);
   const [ownerDashboard, setOwnerDashboard] = useState<OwnerDashboard | null>(
     null,
   );
@@ -1565,9 +1852,12 @@ export default function FaceFitPrototype() {
   const [ownerEditorSaving, setOwnerEditorSaving] = useState(false);
   const [ownerEditorError, setOwnerEditorError] = useState<string | null>(null);
   const [ownerRemoving, setOwnerRemoving] = useState<string | null>(null);
+  const [confirmationPrompt, setConfirmationPrompt] =
+    useState<ConfirmationPromptData | null>(null);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [profileLoading, setProfileLoading] = useState(false);
   const [profileError, setProfileError] = useState<string | null>(null);
+  const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const [accountItems, setAccountItems] = useState<AccountItem[]>([]);
   const [selectedAccountItem, setSelectedAccountItem] =
     useState<AccountItem | null>(null);
@@ -1599,6 +1889,7 @@ export default function FaceFitPrototype() {
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
+  const [stylePreference, setStylePreference] = useState<"men" | "women">("men");
   const [authLoading, setAuthLoading] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
   const [accountRole, setAccountRole] = useState<"customer" | "owner">(
@@ -1642,6 +1933,47 @@ export default function FaceFitPrototype() {
   const [staffPickerLoading, setStaffPickerLoading] = useState(false);
   const [lastBookingId, setLastBookingId] = useState<number | null>(null);
   const back = (fallback: Screen = "home") => setScreen(fallback);
+  const requestLogout = (onConfirm: () => void) =>
+    setConfirmationPrompt({
+      eyebrow: "ACCOUNT",
+      title: "Log out of FaceFit?",
+      message:
+        "You’ll need to log in again to access your saved styles, appointments, and account details.",
+      icon: "log-out-outline",
+      showIcon: false,
+      showEyebrow: false,
+      centerTitle: true,
+      confirmLabel: "Yes, log out",
+      cancelLabel: "No, stay",
+      onConfirm,
+    });
+  const saveHairstyleForCustomer = (hairstyleName: string) => {
+    if (!authToken) {
+      setConfirmationPrompt({
+        eyebrow: "SAVE HAIRSTYLE",
+        title: "Save this style to your account",
+        message: "Log in or create an account to keep this haircut in your saved hairstyles.",
+        icon: "heart-outline",
+        confirmLabel: "Log in",
+        cancelLabel: "Sign up",
+        onConfirm: () => {
+          setAuthError(null);
+          setScreen("login");
+        },
+        onCancel: () => {
+          setAuthError(null);
+          setScreen("signup");
+        },
+      });
+      return;
+    }
+    void saveHairstyle(authToken, hairstyleName)
+      .then(() => setFavoriteToast({ message: `${hairstyleName} saved to your account.`, success: true }))
+      .catch((error) => setFavoriteToast({
+        message: error instanceof Error ? error.message : "Unable to save this hairstyle. Please try again.",
+        success: false,
+      }));
+  };
   const mainScreens = [
     "home",
     "scan",
@@ -1674,6 +2006,17 @@ export default function FaceFitPrototype() {
     }
   }, []);
   const findSalonsForStyle = async (hairstyle: string) => {
+    if (!authToken || isGuestAccount) {
+      requireGuestLogin("Log in or create an account to find a salon and book this hairstyle.");
+      return;
+    }
+    const recommendation =
+      faceAnalysis?.recommendations.find((item) => item.name === hairstyle) ||
+      customHairstyleSuggestions.find((item) => item.name === hairstyle);
+    setSelectedRecommendation(recommendation || null);
+    setSelectedSalonHairstyle(hairstyle);
+    setSalonSearchQuery("");
+    setStyleSalonRecords(null);
     setScreen("salons");
     setSalonsLoading(true);
     setSalonsError(null);
@@ -1718,6 +2061,9 @@ export default function FaceFitPrototype() {
       const profileData = await getProfile(authToken);
       setUserProfile(profileData);
       setAuthUser(profileData);
+      if (profileData.stylePreference === "men" || profileData.stylePreference === "women") {
+        setStylePreference(profileData.stylePreference);
+      }
     } catch (error) {
       setProfileError(
         error instanceof Error ? error.message : "Unable to load your profile.",
@@ -1938,14 +2284,15 @@ export default function FaceFitPrototype() {
         })
         .finally(() => setOwnerRemoving(null));
     };
-    if (Platform.OS === "web" && typeof window !== "undefined") {
-      if (window.confirm(`Remove ${kind}?\n\n${message}`)) remove();
-      return;
-    }
-    Alert.alert(`Remove ${kind}?`, message, [
-      { text: "Cancel", style: "cancel" },
-      { text: "Remove", style: "destructive", onPress: remove },
-    ]);
+    setConfirmationPrompt({
+      eyebrow: "SALON MANAGEMENT",
+      title: `Remove ${kind}?`,
+      message,
+      icon: "trash-outline",
+      confirmLabel: "Yes, remove",
+      cancelLabel: "No, keep it",
+      onConfirm: remove,
+    });
   };
 
   const addPortfolioPhoto = async () => {
@@ -1988,14 +2335,15 @@ export default function FaceFitPrototype() {
         .finally(() => setOwnerRemoving(null));
     };
     const message = `This ${kind} will be removed from the customer view.`;
-    if (Platform.OS === "web" && typeof window !== "undefined") {
-      if (window.confirm(`Remove ${kind}?\n\n${message}`)) remove();
-      return;
-    }
-    Alert.alert(`Remove ${kind}?`, message, [
-      { text: "Cancel", style: "cancel" },
-      { text: "Remove", style: "destructive", onPress: remove },
-    ]);
+    setConfirmationPrompt({
+      eyebrow: "SALON MANAGEMENT",
+      title: `Remove ${kind}?`,
+      message,
+      icon: "trash-outline",
+      confirmLabel: "Yes, remove",
+      cancelLabel: "No, keep it",
+      onConfirm: remove,
+    });
   };
 
   const loadAccountScreen = useCallback(async () => {
@@ -2212,6 +2560,14 @@ export default function FaceFitPrototype() {
     salon: Salon,
     returnTo: "salons" | "nearby-map" | "saved-salons" | "reviews" = "salons",
   ) => {
+        // Closed salons can't be opened for booking (reviews stay reachable).
+    if (returnTo !== "reviews" && !isSalonOpenNow(salon)) {
+      setFavoriteToast({
+        message: `${salon.name} is closed right now. ${salonStatusText(salon).replace("Closed · ", "")}`,
+        success: false,
+      });
+      return;
+    }
     const requestId = ++salonLoadRequestRef.current;
     setSalonDetailReturn(returnTo);
     setSelectedSalon(salon);
@@ -2360,6 +2716,7 @@ export default function FaceFitPrototype() {
             phone,
             password,
             role: accountRole,
+            ...(accountRole === "customer" ? { stylePreference } : {}),
             ...(accountRole === "owner"
               ? {
                   salonName,
@@ -2372,17 +2729,89 @@ export default function FaceFitPrototype() {
               : {}),
           })
         : await loginUser({ email, password });
+      let authenticatedProfile: UserProfile | null = null;
+      if (result.user.role === "customer") {
+        try {
+          authenticatedProfile = await getProfile(result.token);
+          if (authenticatedProfile.stylePreference === "men" || authenticatedProfile.stylePreference === "women") {
+            setStylePreference(authenticatedProfile.stylePreference);
+          }
+        } catch {
+          // Keep the selected registration preference if profile loading is temporarily unavailable.
+        }
+      }
+      let hasAcceptedTerms = false;
+      if (result.user.role === "customer" && !isSignup) {
+        try {
+          const storedConsent = await AsyncStorage.getItem(
+            consentStorageKey(result.user.id),
+          );
+          if (storedConsent) {
+            const consent = JSON.parse(storedConsent) as {
+              version?: number;
+              faceAnalysis?: boolean;
+              location?: boolean;
+            };
+            hasAcceptedTerms =
+              consent.version === CONSENT_VERSION &&
+              consent.faceAnalysis === true &&
+              consent.location === true;
+          }
+        } catch {
+          // If saved consent cannot be read, ask the customer again.
+        }
+      }
       setAuthUser(result.user);
       setAuthToken(result.token);
-      setUserProfile(null);
+      setIsGuestAccount(false);
+      setGuestScanUsed(false);
+      setUserProfile(authenticatedProfile);
+      setFaceAnalysisConsent(hasAcceptedTerms);
+      setLocationConsent(hasAcceptedTerms);
+      setConsentReturnScreen(isSignup ? "signup" : "login");
+      setConsentError(null);
       setPassword("");
-      setScreen(result.user.role === "owner" ? "owner-dashboard" : "consent");
+      setScreen(
+        result.user.role === "owner"
+          ? "owner-dashboard"
+          : hasAcceptedTerms
+            ? "home"
+            : "consent",
+      );
     } catch (error) {
       setAuthError(
         error instanceof Error ? error.message : "Unable to authenticate.",
       );
     } finally {
       setAuthLoading(false);
+    }
+  };
+
+  const acceptConsent = async () => {
+    if (!faceAnalysisConsent || !locationConsent || consentSaving) return;
+    if (!authUser) {
+      setScreen("login");
+      return;
+    }
+    setConsentSaving(true);
+    setConsentError(null);
+    try {
+      await AsyncStorage.setItem(
+        consentStorageKey(authUser.id),
+        JSON.stringify({
+          version: CONSENT_VERSION,
+          acceptedAt: new Date().toISOString(),
+          faceAnalysis: true,
+          location: true,
+        }),
+      );
+      setScreen("home");
+    } catch {
+      setConsentError(
+        "We couldn’t save your agreement. Please try again before continuing.",
+      );
+    } finally {
+      setConsentSaving(false);
     }
   };
 
@@ -2511,7 +2940,7 @@ export default function FaceFitPrototype() {
             "'": "&#39;",
           })[character]!,
       );
-    const html = `<!doctype html><html><head><meta name="viewport" content="width=device-width"><style>body{font-family:Arial,sans-serif;color:#292326;padding:36px}main{max-width:650px;margin:auto;border:1px solid #eadde0;border-radius:20px;padding:32px}h1{color:#743548}.badge{display:inline-block;background:#e8f3ed;color:#315f4b;padding:8px 12px;border-radius:99px;font-weight:bold}.row{padding:12px 0;border-bottom:1px solid #eee}.label{color:#7c7074;font-size:12px;text-transform:uppercase}.value{font-size:17px;font-weight:bold;margin-top:4px}.reference{margin-top:28px;font-size:12px;color:#7c7074}</style></head><body><main><p>FACEFIT APPOINTMENT PROOF</p><h1>Appointment submitted</h1><p class="badge">Pending salon confirmation</p><div class="row"><div class="label">Salon</div><div class="value">${safe(selectedSalon.name)}</div></div><div class="row"><div class="label">Service</div><div class="value">${safe(selectedService.name)}</div></div><div class="row"><div class="label">Date and time</div><div class="value">${safe(selectedDateLabel)} at ${safe(selectedTimeLabel)}</div></div><div class="row"><div class="label">Staff</div><div class="value">${safe(selectedStylist?.name || "Any available professional")}</div></div><div class="row"><div class="label">Estimated price</div><div class="value">PHP ${selectedService.price.toLocaleString()}</div></div><p class="reference">Booking reference: FF-${lastBookingId || "PENDING"} · Present this document to the salon.</p></main></body></html>`;
+    const html = `<!doctype html><html><head><meta name="viewport" content="width=device-width"><style>body{font-family:Arial,sans-serif;color:#24251F;padding:36px}main{max-width:650px;margin:auto;border:1px solid #DCEBC8;border-radius:20px;padding:32px}h1{color:#25430D}.badge{display:inline-block;background:#E6F8C5;color:#25430D;padding:8px 12px;border-radius:99px;font-weight:bold}.row{padding:12px 0;border-bottom:1px solid #DCEBC8}.label{color:#397A24;font-size:12px;text-transform:uppercase}.value{font-size:17px;font-weight:bold;margin-top:4px}.reference{margin-top:28px;font-size:12px;color:#397A24}</style></head><body><main><p>FACEFIT APPOINTMENT PROOF</p><h1>Appointment submitted</h1><p class="badge">Pending salon confirmation</p><div class="row"><div class="label">Salon</div><div class="value">${safe(selectedSalon.name)}</div></div><div class="row"><div class="label">Service</div><div class="value">${safe(selectedService.name)}</div></div><div class="row"><div class="label">Date and time</div><div class="value">${safe(selectedDateLabel)} at ${safe(selectedTimeLabel)}</div></div><div class="row"><div class="label">Staff</div><div class="value">${safe(selectedStylist?.name || "Any available professional")}</div></div><div class="row"><div class="label">Estimated price</div><div class="value">PHP ${selectedService.price.toLocaleString()}</div></div><p class="reference">Booking reference: FF-${lastBookingId || "PENDING"} · Present this document to the salon.</p></main></body></html>`;
     try {
       const { uri } = await Print.printToFileAsync({ html });
       if (Platform.OS !== "web") {
@@ -2531,6 +2960,35 @@ export default function FaceFitPrototype() {
     }
   };
 
+  const guestScanStorageKey = "facefit_guest_scan_used_v1";
+  const requireGuestLogin = (message = "Log in or create an account to unlock more hairstyle options and booking.") => {
+    setAuthError(message);
+    setScreen("login");
+  };
+  const promptGuestAccount = () => {
+    requireGuestLogin("Your free guest scan is complete. Log in or create an account to scan again.");
+  };
+  const startGuestScan = async () => {
+    let scanAlreadyUsed = guestScanUsed;
+    try {
+      scanAlreadyUsed ||= (await AsyncStorage.getItem(guestScanStorageKey)) === "true";
+    } catch {
+      // The in-memory limit still applies if local storage is unavailable.
+    }
+    if (scanAlreadyUsed) {
+      setGuestScanUsed(true);
+      promptGuestAccount();
+      return;
+    }
+    setAuthError(null);
+    setIsGuestAccount(true);
+    setAuthToken(null);
+    setAuthUser(null);
+    setFaceAnalysisConsent(true);
+    setLocationConsent(true);
+    setScreen("scan");
+  };
+
   const processScan = async ({
     uri,
     imageData,
@@ -2538,25 +2996,47 @@ export default function FaceFitPrototype() {
     uri: string;
     imageData: string;
   }) => {
-    if (!authToken) {
-      Alert.alert(
-        "Log in required",
-        "Please log in before analyzing your face.",
-      );
-      setScreen("login");
-      return;
+    if (isGuestAccount) {
+      let scanAlreadyUsed = guestScanUsed;
+      try {
+        scanAlreadyUsed ||= (await AsyncStorage.getItem(guestScanStorageKey)) === "true";
+      } catch {
+        // Continue using the in-memory scan limit.
+      }
+      if (scanAlreadyUsed) {
+        setGuestScanUsed(true);
+        promptGuestAccount();
+        return;
+      }
     }
     setUploaded(uri);
+    setUploadedImageData(imageData);
+    setHairScalpAnalysis(null);
+    setCustomHairstylePrompt("");
+    setCustomHairstyleSuggestions([]);
+    setCustomSuggestionPreviewImages({});
+    setCustomSuggestionPreviewLoading({});
+    setActiveCustomSuggestionIndex(0);
     setFaceAnalysis(null);
     setSelectedRecommendation(null);
+    setHairstylePreviewImages({});
+    setHairstylePreviewLoading({});
     setStyleSalonRecords(null);
     setScreen("processing");
     try {
       const [analysis] = await Promise.all([
-        analyzeFace(authToken, imageData),
+        analyzeFace(isGuestAccount ? null : authToken, imageData, stylePreference),
         new Promise((resolve) => setTimeout(resolve, 1800)),
       ]);
       setFaceAnalysis(analysis);
+      if (isGuestAccount) {
+        setGuestScanUsed(true);
+        try {
+          await AsyncStorage.setItem(guestScanStorageKey, "true");
+        } catch {
+          // Keep the successful scan limit for this app session.
+        }
+      }
       setScreen("result");
     } catch (error) {
       Alert.alert(
@@ -2706,6 +3186,33 @@ export default function FaceFitPrototype() {
         </>
       )}
       {signup && (
+        accountRole === "customer" ? (
+          <View style={{ marginBottom: 12 }}>
+            <Text style={s.accountTypeLabel}>Gender</Text>
+            <Text style={[s.small, { marginBottom: 9 }]}>Used to tailor your hairstyle recommendations.</Text>
+            <View style={s.accountTypeRow}>
+              {([
+                ["men", "Male"],
+                ["women", "Female"],
+              ] as const).map(([value, label]) => {
+                const selected = stylePreference === value;
+                return (
+                  <Pressable
+                    key={value}
+                    accessibilityRole="radio"
+                    accessibilityState={{ checked: selected }}
+                    onPress={() => setStylePreference(value)}
+                    style={[s.accountTypeCard, { minHeight: 58, justifyContent: "center" }, selected && s.accountTypeCardActive]}
+                  >
+                    <Text style={[s.accountTypeTitle, selected && s.accountTypeTitleActive]}>{label}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </View>
+        ) : null
+      )}
+      {signup && (
         <Field
           icon="person-outline"
           placeholder="Full name"
@@ -2830,7 +3337,7 @@ export default function FaceFitPrototype() {
       )}
       {authError && (
         <View style={s.authError}>
-          <Ionicons name="alert-circle-outline" size={20} color="#9C3045" />
+          <Ionicons name="alert-circle-outline" size={20} color="#25430D" />
           <Text style={s.authErrorText}>{authError}</Text>
         </View>
       )}
@@ -2853,6 +3360,16 @@ export default function FaceFitPrototype() {
             : "New here? Create an account"}
         </Text>
       </Pressable>
+      {!signup && (
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => void startGuestScan()}
+          style={s.guestLoginButton}
+        >
+          <Ionicons name="scan-outline" size={19} color={C.roseDark} />
+          <Text style={s.guestLoginText}>Continue as guest · scan once</Text>
+        </Pressable>
+      )}
     </ScreenFrame>
   );
 
@@ -2878,7 +3395,7 @@ export default function FaceFitPrototype() {
   );
 
   const scan = (
-    <FaceScanScreen onBack={() => back()} onCaptured={processScan} />
+    <FaceScanScreen onBack={() => back(isGuestAccount ? "login" : "home")} onCaptured={processScan} />
   );
 
   const processing = (
@@ -2921,12 +3438,38 @@ export default function FaceFitPrototype() {
   const menMatches = (faceAnalysis?.recommendations || []).filter(
     (item) => item.audience === "men",
   );
+  const allMatchSuggestions = faceAnalysis?.recommendations || [];
+  const matchSuggestions = isGuestAccount ? allMatchSuggestions.slice(0, 1) : allMatchSuggestions;
+  const matchCardWidth = Math.min(Math.max(width - 48, 280), 560);
+  useEffect(() => {
+    setActiveHairstyleIndex(0);
+    if (screen === "result" && matchSuggestions.length > 0) {
+      void Promise.all(matchSuggestions.map((recommendation) => generateMatchPreview(recommendation)));
+    }
+  }, [screen, faceAnalysis, uploadedImageData]);
   const recommendationCard = (
-    item: FaceAnalysis["recommendations"][number],
+  item: FaceAnalysis["recommendations"][number],
   ) => (
-    <Pressable onPress={() => { setSelectedRecommendation(item); setScreen("style-detail"); }} style={s.recCard} key={`${item.audience}-${item.name}`}>
-      <View style={s.matchBadge}><Text style={s.matchText}>{item.score}% match</Text></View>
-      <View style={s.recBody}><View style={s.sectionHead}><Text style={s.cardTitle}>{item.name}</Text><Ionicons name="chevron-forward" size={20} color={C.rose} /></View><Text style={s.small}>{item.reason}</Text></View>
+    <Pressable 
+      onPress={() => { 
+        setSelectedRecommendation(item); 
+        setScreen("style-detail"); 
+        // AUTO-TRIGGER GENERATION ON SELECTION
+        void handleGenerateAiPreview(item);
+      }} 
+      style={s.recCard} 
+      key={`${item.audience}-${item.name}`}
+    >
+      <View style={s.matchBadge}>
+        <Text style={s.matchText}>{item.score}% match</Text>
+      </View>
+      <View style={s.recBody}>
+        <View style={s.sectionHead}>
+          <Text style={s.cardTitle}>{item.name}</Text>
+          <Ionicons name="chevron-forward" size={20} color={C.rose} />
+        </View>
+        <Text style={s.small}>{item.reason}</Text>
+      </View>
     </Pressable>
   );
 
@@ -2934,7 +3477,7 @@ export default function FaceFitPrototype() {
     <ScreenFrame>
       <Header
         title="Your result"
-        onBack={() => setScreen("home")}
+        onBack={() => setScreen(isGuestAccount ? "login" : "home")}
         action="share-outline"
       />
       <Text style={s.eyebrow}>MOST LIKELY FACE SHAPE</Text>
@@ -2979,12 +3522,242 @@ export default function FaceFitPrototype() {
           </Text>
         </View>
       </View>
+      <Text style={s.sectionTitle}>Hair analysis</Text>
+      <Text style={s.body}>Get general care observations based on what is visible in your photo.</Text>
+      <Button
+        label={isGuestAccount ? "Log in to unlock hair analysis" : "Analyze hair"}
+        disabled={isAnalyzingHairScalp || !uploadedImageData}
+        onPress={() => void handleAnalyzeHairScalp()}
+        icon={isGuestAccount ? "lock-closed" : "sparkles"}
+      />
+      <Modal transparent animationType="fade" visible={isHairScalpModalVisible} onRequestClose={() => setIsHairScalpModalVisible(false)}>
+        <View style={{ flex: 1, backgroundColor: "rgba(20, 34, 17, 0.62)", justifyContent: "center", alignItems: "center", padding: 18 }}>
+          <View style={{ width: "100%", maxWidth: 520, maxHeight: "88%", borderRadius: 28, backgroundColor: C.pale, padding: 20, paddingTop: 20, borderWidth: 1, borderColor: C.line }}>
+            <Pressable accessibilityRole="button" accessibilityLabel="Close hair analysis" hitSlop={10} onPress={() => setIsHairScalpModalVisible(false)} style={{ position: "absolute", top: 16, right: 16, zIndex: 1, width: 40, height: 40, borderRadius: 20, backgroundColor: C.white, borderWidth: 1, borderColor: C.line, alignItems: "center", justifyContent: "center" }}>
+              <Ionicons name="close" size={22} color={C.roseDark} />
+            </Pressable>
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 5 }}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 13, paddingRight: 48, marginBottom: 20 }}>
+                <View style={{ width: 50, height: 50, borderRadius: 17, backgroundColor: C.blush, alignItems: "center", justifyContent: "center" }}><Ionicons name="leaf-outline" size={25} color={C.rose} /></View>
+                <View style={{ flex: 1 }}><Text style={[s.eyebrow, { marginBottom: 4 }]}>PERSONAL CARE</Text><Text style={{ fontSize: 23, lineHeight: 29, fontWeight: "900", color: C.ink }}>Hair analysis</Text><Text style={{ color: C.muted, fontSize: 13, lineHeight: 19, marginTop: 3 }}>A few observations from your photo</Text></View>
+              </View>
+              {isAnalyzingHairScalp ? (
+                <View style={{ paddingVertical: 38, alignItems: "center", backgroundColor: C.white, borderRadius: 20, borderWidth: 1, borderColor: C.line }}>
+                  <ActivityIndicator size="large" color={C.rose} />
+                  <Text style={{ marginTop: 14, color: C.ink, fontWeight: "700", fontSize: 15 }}>Analyzing your photo…</Text>
+                  <Text style={{ marginTop: 5, color: C.muted, fontSize: 13 }}>This usually takes a few seconds.</Text>
+                </View>
+              ) : hairScalpAnalysis ? (
+                <>
+                  <View style={{ flexDirection: "row", gap: 9, marginBottom: 20 }}>
+                    {([ ["HAIR TYPE", hairScalpAnalysis.hairType], ["LENGTH", hairScalpAnalysis.hairLength], ["TEXTURE", hairScalpAnalysis.hairTexture] ] as const).map(([label, value]) => (
+                      <View key={label} style={{ flex: 1, minHeight: 88, borderRadius: 17, padding: 12, backgroundColor: C.white, borderWidth: 1, borderColor: C.line, justifyContent: "center" }}>
+                        <Text style={{ color: C.rose, fontSize: 9, lineHeight: 13, fontWeight: "900", letterSpacing: 0.7 }}>{label}</Text>
+                        <Text style={{ color: C.ink, fontSize: 14, lineHeight: 19, fontWeight: "800", marginTop: 7 }}>{value}</Text>
+                      </View>
+                    ))}
+                  </View>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 9, marginBottom: 11 }}>
+                    <Ionicons name="sparkles" size={18} color={C.rose} />
+                    <Text style={{ color: C.ink, fontSize: 17, fontWeight: "900" }}>Care tips</Text>
+                  </View>
+                  <View style={{ gap: 10 }}>
+                    {hairScalpAnalysis.careTips.map((tip, index) => (
+                      <View key={`${index}-${tip}`} style={{ flexDirection: "row", alignItems: "flex-start", gap: 12, padding: 14, borderRadius: 17, backgroundColor: C.white, borderWidth: 1, borderColor: C.line }}>
+                        <View style={{ width: 27, height: 27, borderRadius: 10, backgroundColor: C.blush, alignItems: "center", justifyContent: "center", marginTop: 1 }}><Text style={{ color: C.roseDark, fontSize: 12, fontWeight: "900" }}>{index + 1}</Text></View>
+                        <Text style={{ flex: 1, color: C.ink, fontSize: 14, lineHeight: 22, fontWeight: "500" }}>{tip}</Text>
+                      </View>
+                    ))}
+                  </View>
+                  <Text style={{ color: C.muted, fontSize: 12, lineHeight: 18, marginTop: 16, paddingHorizontal: 2 }}>{hairScalpAnalysis.disclaimer}</Text>
+                </>
+              ) : null}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
       <View style={s.resultMatchesHeader}>
         <View style={s.resultMatchesIcon}><Ionicons name="sparkles" size={22} color={C.rose} /></View>
         <View style={s.salonCardGrow}><Text style={s.sectionTitle}>Your hairstyle matches</Text><Text style={s.small}>Ranked for your {faceAnalysis.faceShape} face and detected proportions.</Text></View>
       </View>
-      {menMatches.map(recommendationCard)}
-      <Button label="Scan again" onPress={() => setScreen("scan")} secondary />
+      {matchSuggestions.length > 0 ? (
+        <>
+          <ScrollView
+            horizontal
+            pagingEnabled
+            nestedScrollEnabled
+            showsHorizontalScrollIndicator={false}
+            decelerationRate="fast"
+            snapToInterval={matchCardWidth}
+            onMomentumScrollEnd={(event) => {
+              if (isGuestAccount && event.nativeEvent.contentOffset.x > 12) {
+                requireGuestLogin("Log in or create an account to view more hairstyle matches.");
+                return;
+              }
+              const nextIndex = Math.min(
+                matchSuggestions.length - 1,
+                Math.max(0, Math.round(event.nativeEvent.contentOffset.x / matchCardWidth)),
+              );
+              setActiveHairstyleIndex(nextIndex);
+              const nextMatch = matchSuggestions[nextIndex];
+              if (nextMatch) void generateMatchPreview(nextMatch);
+            }}
+            contentContainerStyle={{ paddingBottom: 4 }}
+          >
+            {matchSuggestions.map((item, index) => {
+              const preview = hairstylePreviewImages[item.name];
+              const isLoadingPreview = hairstylePreviewLoading[item.name];
+              return (
+                <View key={`${item.audience}-${item.name}`} style={{ width: matchCardWidth, paddingRight: 12 }}>
+                  <View style={{ borderRadius: 20, borderWidth: 1, borderColor: C.line, backgroundColor: C.white, overflow: "hidden" }}>
+                    <View style={{ width: "100%", aspectRatio: 1, backgroundColor: C.white, alignItems: "center", justifyContent: "center" }}>
+                      {preview ? (
+                        <Image source={{ uri: preview }} style={{ width: "100%", height: "100%" }} resizeMode="contain" />
+                      ) : isLoadingPreview ? (
+                        <View style={{ alignItems: "center", padding: 20 }}>
+                          <ActivityIndicator size="large" color={C.rose} />
+                          <Text style={[s.small, { marginTop: 12 }]}>Creating your hairstyle preview…</Text>
+                        </View>
+                      ) : (
+                        <View style={{ alignItems: "center", padding: 20 }}>
+                          <Ionicons name="camera-outline" size={34} color={C.rose} />
+                          <Text style={[s.small, { marginTop: 8, textAlign: "center" }]}>Preview unavailable. Swipe away and back to try again.</Text>
+                        </View>
+                      )}
+                    </View>
+                    <View style={{ padding: 16 }}>
+                      <View style={s.sectionHead}>
+                        <Text style={s.cardTitle}>{item.name}</Text>
+                        <Text style={s.small}>{index + 1} of {matchSuggestions.length}</Text>
+                      </View>
+                      <View style={{ alignSelf: "flex-start", marginTop: 7, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 12, backgroundColor: C.blush }}>
+                        <Text style={[s.matchText, { fontSize: 11 }]}>{item.score}% match</Text>
+                      </View>
+                      <Text style={[s.small, { marginTop: 6 }]}>{item.reason}</Text>
+                      <View style={{ flexDirection: "row", gap: 10, marginTop: 18 }}>
+                        <Pressable accessibilityRole="button" onPress={() => saveHairstyleForCustomer(item.name)} style={{ flex: 1, minHeight: 48, borderRadius: 15, backgroundColor: C.blush, borderWidth: 1, borderColor: C.line, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6 }}><Ionicons name="heart" size={17} color={C.roseDark} /><Text style={[s.matchText, { fontSize: 12 }]}>Save hairstyle</Text></Pressable>
+                        <Pressable accessibilityRole="button" onPress={() => void findSalonsForStyle(item.name)} style={{ flex: 1, minHeight: 48, borderRadius: 15, backgroundColor: C.rose, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6 }}><Ionicons name="location" size={17} color={C.white} /><Text style={{ color: C.white, fontSize: 12, fontWeight: "800" }}>Find salon</Text></Pressable>
+                      </View>
+                    </View>
+                  </View>
+                </View>
+              );
+            })}
+          </ScrollView>
+          <View style={{ flexDirection: "row", justifyContent: "center", gap: 7, marginTop: 10, marginBottom: 8 }}>
+            {matchSuggestions.map((item, index) => (
+              <View key={item.name} style={{ width: index === activeHairstyleIndex ? 20 : 7, height: 7, borderRadius: 4, backgroundColor: index === activeHairstyleIndex ? C.rose : C.line }} />
+            ))}
+          </View>
+          {isGuestAccount ? (
+            <Button label="Log in to view more styles" onPress={() => requireGuestLogin("Log in or create an account to view more hairstyle matches.")} icon="lock-closed" secondary />
+          ) : (
+            <Text style={[s.small, { textAlign: "center", marginBottom: 14 }]}>Swipe to preview each match</Text>
+          )}
+        </>
+      ) : (
+        <Text style={s.small}>No hairstyle matches are available for this scan yet.</Text>
+      )}
+      <Text style={s.sectionTitle}>Describe your hairstyle</Text>
+      <Text style={s.body}>{isGuestAccount ? "Create an account to unlock custom AI hairstyle suggestions." : "Tell us what you want to change. AI will suggest styles that fit your request and face shape."}</Text>
+      {isGuestAccount ? <Button label="Log in to unlock AI prompt" onPress={() => setScreen("login")} icon="lock-closed" /> : <>
+      <TextInput
+        accessibilityLabel="Describe the hairstyle you want"
+        value={customHairstylePrompt}
+        onChangeText={setCustomHairstylePrompt}
+        placeholder="Example: a short textured cut with a low fade"
+        placeholderTextColor="#397A24"
+        multiline
+        maxLength={300}
+        textAlignVertical="top"
+        style={{ width: "100%", minHeight: 92, padding: 14, borderRadius: 16, borderWidth: 1, borderColor: C.line, backgroundColor: C.white, color: C.ink, marginVertical: 10 }}
+      />
+      {customHairstylePrompt.trim().length > 0 && !isValidHairstylePrompt(customHairstylePrompt) && <Text style={[s.small, { color: C.roseDark, marginBottom: 10 }]}>Include a hairstyle or cut and a detail. For example: “a textured bob for thick hair”. Random text and single words cannot generate suggestions.</Text>}
+      <Button
+        label={isSuggestingHairstyles ? "Finding styles..." : "Suggest hairstyles"}
+        disabled={!isValidHairstylePrompt(customHairstylePrompt) || isSuggestingHairstyles}
+        onPress={() => void handleRequestHairstyleSuggestions()}
+        icon="sparkles"
+      />
+      </>}
+      {customHairstyleSuggestions.length > 0 && (
+        <>
+          <Text style={s.sectionTitle}>Previews for your request</Text>
+          <Text style={[s.small, { marginBottom: 10 }]}>Swipe through your suggested styles. Previews are generated automatically.</Text>
+          <ScrollView
+            horizontal
+            pagingEnabled
+            nestedScrollEnabled
+            showsHorizontalScrollIndicator={false}
+            decelerationRate="fast"
+            snapToInterval={matchCardWidth}
+            onMomentumScrollEnd={(event) => {
+              const nextIndex = Math.min(
+                customHairstyleSuggestions.length - 1,
+                Math.max(0, Math.round(event.nativeEvent.contentOffset.x / matchCardWidth)),
+              );
+              setActiveCustomSuggestionIndex(nextIndex);
+              const nextSuggestion = customHairstyleSuggestions[nextIndex];
+              if (nextSuggestion) void generateCustomSuggestionPreview(nextSuggestion);
+            }}
+            contentContainerStyle={{ paddingBottom: 4 }}
+          >
+            {customHairstyleSuggestions.map((item, index) => {
+              const preview = customSuggestionPreviewImages[item.name];
+              const isLoadingPreview = customSuggestionPreviewLoading[item.name];
+              return (
+                <View key={`${item.audience}-${item.name}`} style={{ width: matchCardWidth, paddingRight: 12 }}>
+                  <View style={{ borderRadius: 20, borderWidth: 1, borderColor: C.line, backgroundColor: C.white, overflow: "hidden" }}>
+                    <View style={{ width: "100%", aspectRatio: 1, backgroundColor: C.white, alignItems: "center", justifyContent: "center" }}>
+                      {preview ? (
+                        <Image source={{ uri: preview }} style={{ width: "100%", height: "100%" }} resizeMode="contain" />
+                      ) : isLoadingPreview ? (
+                        <View style={{ alignItems: "center", padding: 20 }}>
+                          <ActivityIndicator size="large" color={C.rose} />
+                          <Text style={[s.small, { marginTop: 12 }]}>Creating your hairstyle preview…</Text>
+                        </View>
+                      ) : (
+                        <View style={{ alignItems: "center", padding: 20 }}>
+                          <Ionicons name="camera-outline" size={34} color={C.rose} />
+                          <Text style={[s.small, { marginTop: 8, textAlign: "center" }]}>Preview unavailable. Swipe back to retry.</Text>
+                        </View>
+                      )}
+                    </View>
+                    <View style={{ padding: 16 }}>
+                      <View style={s.sectionHead}>
+                        <Text style={s.cardTitle}>{item.name}</Text>
+                        <Text style={s.small}>{index + 1} of {customHairstyleSuggestions.length}</Text>
+                      </View>
+                      <View style={{ alignSelf: "flex-start", marginTop: 7, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 12, backgroundColor: C.blush }}>
+                        <Text style={[s.matchText, { fontSize: 11 }]}>{item.score}% match</Text>
+                      </View>
+                      <Text style={[s.small, { marginTop: 6 }]}>{item.reason}</Text>
+                      <View style={{ flexDirection: "row", gap: 10, marginTop: 18 }}>
+                        <Pressable accessibilityRole="button" onPress={() => saveHairstyleForCustomer(item.name)} style={{ flex: 1, minHeight: 48, borderRadius: 15, backgroundColor: C.blush, borderWidth: 1, borderColor: C.line, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6 }}><Ionicons name="heart" size={17} color={C.roseDark} /><Text style={[s.matchText, { fontSize: 12 }]}>Save hairstyle</Text></Pressable>
+                        <Pressable accessibilityRole="button" onPress={() => { if (!authToken) { setScreen("login"); return; } void findSalonsForStyle(item.name); }} style={{ flex: 1, minHeight: 48, borderRadius: 15, backgroundColor: C.rose, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6 }}><Ionicons name="location" size={17} color={C.white} /><Text style={{ color: C.white, fontSize: 12, fontWeight: "800" }}>Find salon</Text></Pressable>
+                      </View>
+                    </View>
+                  </View>
+                </View>
+              );
+            })}
+          </ScrollView>
+          <View style={{ flexDirection: "row", justifyContent: "center", gap: 7, marginTop: 10, marginBottom: 8 }}>
+            {customHairstyleSuggestions.map((item, index) => (
+              <View key={item.name} style={{ width: index === activeCustomSuggestionIndex ? 20 : 7, height: 7, borderRadius: 4, backgroundColor: index === activeCustomSuggestionIndex ? C.rose : C.line }} />
+            ))}
+          </View>
+          <Text style={[s.small, { textAlign: "center", marginBottom: 14 }]}>Swipe to preview each suggestion</Text>
+        </>
+      )}
+      <Button
+        label="Scan again"
+        onPress={() => {
+          if (isGuestAccount && guestScanUsed) promptGuestAccount();
+          else setScreen("scan");
+        }}
+        secondary
+      />
     </ScreenFrame>
   ) : (
     processing
@@ -2992,87 +3765,49 @@ export default function FaceFitPrototype() {
 
   const recommendations = (
     <ScreenFrame>
-      <Header
-        title="Men's top matches"
-        onBack={() => setScreen("result")}
-        action="heart-outline"
-      />
+      <Header title="Men's top matches" onBack={() => setScreen("result")} action="heart-outline" />
       <Text style={s.body}>
-        Men&apos;s hairstyles ranked for your{" "}
-        {faceAnalysis?.faceShape || "detected"} face shape and facial
-        proportions.
+        Men&apos;s hairstyles ranked for your {faceAnalysis?.faceShape || "detected"} face shape and facial proportions.
       </Text>
       <View style={s.chatBox}>
         <Ionicons name="sparkles" size={19} color={C.rose} />
-        <TextInput
-          style={s.chatInput}
-          placeholder="Refine: shorter, curly, low-maintenance…"
-          placeholderTextColor="#9A8D91"
-        />
+        <TextInput style={s.chatInput} placeholder="Refine: shorter, curly, low-maintenance…" placeholderTextColor="#397A24" />
         <Ionicons name="arrow-up-circle" size={27} color={C.rose} />
       </View>
       <Text style={s.matchSectionTitle}>Recommended for you</Text>
-      <Text style={s.matchSectionCopy}>
-        Shapes and finishes selected for your facial structure.
-      </Text>
+      <Text style={s.matchSectionCopy}>Shapes and finishes selected for your facial structure.</Text>
       {menMatches.map(recommendationCard)}
     </ScreenFrame>
   );
 
   const styleDetail = selectedRecommendation ? (
     <ScreenFrame>
-      <Header
-        title="Style details"
-        onBack={() => setScreen("recommendations")}
-        action="heart-outline"
-      />
+      <Header title="Style details" onBack={() => setScreen("recommendations")} action="heart-outline" />
       <View style={s.detailTitle}>
         <View style={{ flex: 1 }}>
-          <Text style={s.eyebrow}>
-            {selectedRecommendation.audience === "men"
-              ? "MEN'S STYLE"
-              : "WOMEN'S STYLE"}
-          </Text>
+          <Text style={s.eyebrow}>{selectedRecommendation.audience === "men" ? "MEN'S STYLE" : "WOMEN'S STYLE"}</Text>
           <Text style={s.title}>{selectedRecommendation.name}</Text>
-          <Text style={s.matchText}>
-            {selectedRecommendation.score}% match for you
-          </Text>
+          <Text style={s.matchText}>{selectedRecommendation.score}% match for you</Text>
         </View>
-        <View style={s.scoreCircle}>
-          <Text style={s.scoreText}>{selectedRecommendation.score}</Text>
-        </View>
+        <View style={s.scoreCircle}><Text style={s.scoreText}>{selectedRecommendation.score}</Text></View>
+      </View>
+      <View style={{ width: "100%", height: 280, borderRadius: 20, backgroundColor: C.blush, marginVertical: 15, overflow: "hidden", alignItems: "center", justifyContent: "center" }}>
+        {isGeneratingAi ? (
+          <View style={{ alignItems: "center" }}><ActivityIndicator size="large" color={C.rose} /><Text style={{ marginTop: 10, color: C.roseDark, fontWeight: "700" }}>Generating AI Hairstyle...</Text></View>
+        ) : aiPreviewImage ? (
+          <Image source={{ uri: aiPreviewImage }} style={{ width: "100%", height: "100%" }} resizeMode="cover" />
+        ) : (
+          <Text style={{ color: C.muted }}>Unable to load image preview</Text>
+        )}
       </View>
       <Text style={s.sectionTitle}>Why it suits you</Text>
       <Text style={s.body}>{selectedRecommendation.reason}</Text>
-      <View style={s.chipRow}>
-        <View style={s.chip}>
-          <Text style={s.chipText}>{faceAnalysis?.faceShape} face</Text>
-        </View>
-        <View style={s.chip}>
-          <Text style={s.chipText}>Landmark matched</Text>
-        </View>
-      </View>
       <Button
         label="Save hairstyle"
-        disabled={!authToken}
-        onPress={() => {
-          if (authToken)
-            void saveHairstyle(authToken, selectedRecommendation.name)
-              .then(() =>
-                Alert.alert(
-                  "Saved",
-                  `${selectedRecommendation.name} was added to your saved hairstyles.`,
-                ),
-              )
-              .catch((error) => Alert.alert("Unable to save", error.message));
-        }}
+        onPress={() => saveHairstyleForCustomer(selectedRecommendation.name)}
         icon="heart"
       />
-      <Button
-        label="Find a salon for this style"
-        onPress={() => void findSalonsForStyle(selectedRecommendation.name)}
-        icon="location"
-      />
+      <Button label="Find a salon for this style" onPress={() => void findSalonsForStyle(selectedRecommendation.name)} icon="location" />
     </ScreenFrame>
   ) : (
     recommendations
@@ -3129,7 +3864,7 @@ export default function FaceFitPrototype() {
           value={salonSearchQuery}
           onChangeText={setSalonSearchQuery}
           placeholder="Search salon, address, or city"
-          placeholderTextColor="#A89DA0"
+          placeholderTextColor="#397A24"
           returnKeyType="search"
           clearButtonMode="while-editing"
           style={s.salonSearchInput}
@@ -3146,6 +3881,18 @@ export default function FaceFitPrototype() {
           </Pressable>
         )}
       </View>
+      {selectedSalonHairstyle && (
+        <View style={{ paddingHorizontal: 4, paddingBottom: 12 }}>
+          <Text style={s.cardTitle}>Salons for {selectedSalonHairstyle}</Text>
+          <Text style={s.small}>
+            {salonsLoading
+              ? "Finding Nasugbu salons…"
+              : styleSalonRecords?.[0]?.hairstyleMatchType === "general"
+                ? "These salons list haircut services. Contact them to confirm they can do this exact style."
+                : "These salons are listed for this style. Contact them to confirm current services and availability."}
+          </Text>
+        </View>
+      )}
       <View style={s.segment}>
         <Pressable
           onPress={() => setSalonView("list")}
@@ -3229,13 +3976,17 @@ export default function FaceFitPrototype() {
         filteredSalonRecords.map((salon) => {
           const favorite = favoriteSalonIds.includes(salon.id);
           const busy = savingFavoriteSalonIds.includes(salon.id);
+          const open = isSalonOpenNow(salon);
           return (
             <Pressable
               key={salon.id}
+              disabled={!open}
+              accessibilityState={{ disabled: !open }}
+              accessibilityHint={open ? undefined : "This salon is closed"}
               onPress={() => void openSalon(salon)}
-              style={s.listCard}
+              style={[s.listCard, !open && s.listCardClosed]}
             >
-              <View style={s.salonSquare}>
+              <View style={[s.salonSquare, !open && s.salonClosedDim]}>
                 {salon.profileImageUrl ? (
                   <Image
                     accessibilityLabel={`${salon.name} profile picture`}
@@ -3246,10 +3997,18 @@ export default function FaceFitPrototype() {
                   <Ionicons name="cut" size={28} color={C.rose} />
                 )}
               </View>
-              <View style={{ flex: 1 }}>
+              <View style={[{ flex: 1 }, !open && s.salonClosedDim]}>
                 <Text style={s.cardTitle}>{salon.name}</Text>
                 <Text style={s.small}>{salon.address}</Text>
                 <Text style={s.small}>{salon.phone || salon.city}</Text>
+                {!open && (
+                  <View style={s.closedBadge}>
+                    <Ionicons name="time-outline" size={13} color="#25430D" />
+                    <Text style={s.closedBadgeText}>
+                      {salonStatusText(salon) || "Closed"}
+                    </Text>
+                  </View>
+                )}
               </View>
               <Pressable
                 accessibilityRole="checkbox"
@@ -3342,7 +4101,7 @@ export default function FaceFitPrototype() {
             <View style={s.salonHeroContent}>
               <Text style={s.salonProfileName}>{selectedSalon.name}</Text>
               <View style={s.salonRatingRow}>
-                <Ionicons name="star" size={17} color="#FFD58A" />
+                <Ionicons name="star" size={17} color="#8BCF35" />
                 <Text style={s.salonRatingText}>
                   {salonReviewSummary.count
                     ? salonReviewSummary.average.toFixed(1)
@@ -3824,7 +4583,7 @@ export default function FaceFitPrototype() {
                     maxLength={500}
                     multiline
                     placeholder="What stood out about your visit?"
-                    placeholderTextColor="#A89DA0"
+                    placeholderTextColor="#397A24"
                     style={s.reviewInput}
                   />
                   <Text style={s.reviewCharacterCount}>
@@ -4251,7 +5010,7 @@ export default function FaceFitPrototype() {
         </Pressable>
       ) : bookingRecords.length === 0 ? (
         <View style={s.empty}>
-          <Ionicons name="calendar-outline" size={40} color="#CDBEC2" />
+          <Ionicons name="calendar-outline" size={40} color="#E6F8C5" />
           <Text style={s.cardTitle}>No appointments yet</Text>
           <Text style={s.small}>
             Bookings you make with a salon will appear here.
@@ -4284,7 +5043,29 @@ export default function FaceFitPrototype() {
 
   const profile = (
     <ScreenFrame>
-      <Header title="Profile" action="settings-outline" />
+      <View style={s.profileHeaderWrap}>
+        <Header title="Profile" action="settings-outline" onAction={() => setProfileMenuOpen((open) => !open)} />
+        {profileMenuOpen && (
+          <View style={s.profileHeaderMenu}>
+            <Pressable accessibilityRole="button" onPress={() => { setProfileMenuOpen(false); setScreen("settings"); }} style={s.profileHeaderMenuItem}>
+              <Ionicons name="settings-outline" size={19} color={C.ink} />
+              <Text style={s.cardTitle}>Settings</Text>
+            </Pressable>
+            <Pressable accessibilityRole="button" onPress={() => {
+              setProfileMenuOpen(false);
+              requestLogout(() => {
+                setAuthUser(null);
+                setAuthToken(null);
+                setUserProfile(null);
+                setScreen("login");
+              });
+            }} style={s.profileHeaderMenuItem}>
+              <Ionicons name="log-out-outline" size={19} color={C.ink} />
+              <Text style={s.cardTitle}>Log out</Text>
+            </Pressable>
+          </View>
+        )}
+      </View>
       {profileLoading && !userProfile ? (
         <ActivityIndicator color={C.rose} style={s.dataLoader} />
       ) : profileError && !userProfile ? (
@@ -4319,10 +5100,10 @@ export default function FaceFitPrototype() {
             <Text style={s.eyebrow}>MY HAIR PROFILE</Text>
             <View style={s.preferenceRow}>
               {[
-                ["Type", userProfile?.hairType],
-                ["Length", userProfile?.hairLength],
-                ["Texture", userProfile?.hairTexture],
-                ["Face", userProfile?.faceShape],
+                ["Type", hairScalpAnalysis?.hairType || userProfile?.hairType],
+                ["Length", hairScalpAnalysis?.hairLength || userProfile?.hairLength],
+                ["Texture", hairScalpAnalysis?.hairTexture || userProfile?.hairTexture],
+                ["Face shape", faceAnalysis?.faceShape || userProfile?.faceShape],
               ].map((x) => (
                 <View style={s.preferenceItem} key={x[0]}>
                   <Text style={s.small}>{x[0]}</Text>
@@ -4330,6 +5111,25 @@ export default function FaceFitPrototype() {
                 </View>
               ))}
             </View>
+            {faceAnalysis && (
+              <>
+                <Text style={[s.eyebrow, { marginTop: 16 }]}>LATEST SCAN MEASUREMENTS</Text>
+                <View style={s.preferenceRow}>
+                  <View style={s.preferenceItem}>
+                    <Text style={s.small}>Length / width</Text>
+                    <Text style={s.cardTitle}>{faceAnalysis.measurements.lengthToWidth.toFixed(2)}×</Text>
+                  </View>
+                  <View style={s.preferenceItem}>
+                    <Text style={s.small}>Jaw / cheek</Text>
+                    <Text style={s.cardTitle}>{faceAnalysis.measurements.jawToCheek.toFixed(2)}×</Text>
+                  </View>
+                  <View style={s.preferenceItem}>
+                    <Text style={s.small}>Forehead / cheek</Text>
+                    <Text style={s.cardTitle}>{faceAnalysis.measurements.foreheadToCheek.toFixed(2)}×</Text>
+                  </View>
+                </View>
+              </>
+            )}
           </View>
         </>
       )}
@@ -4338,7 +5138,6 @@ export default function FaceFitPrototype() {
         ["storefront-outline", "Saved salons", "saved-salons"],
         ["notifications-outline", "Notifications", "notifications"],
         ["star-outline", "My reviews", "reviews"],
-        ["shield-checkmark-outline", "Settings", "settings"],
       ].map((x) => (
         <Pressable
           key={x[1]}
@@ -4387,7 +5186,7 @@ export default function FaceFitPrototype() {
         </Pressable>
       ) : accountItems.length === 0 ? (
         <View style={s.empty}>
-          <Ionicons name="notifications-outline" size={40} color="#CDBEC2" />
+          <Ionicons name="notifications-outline" size={40} color="#E6F8C5" />
           <Text style={s.cardTitle}>No notifications yet</Text>
           <Text style={s.small}>
             Booking and review updates will appear here.
@@ -4524,7 +5323,7 @@ export default function FaceFitPrototype() {
           <Ionicons
             name={title === "My reviews" ? "star-outline" : "heart-outline"}
             size={40}
-            color="#CDBEC2"
+            color="#E6F8C5"
           />
           <Text style={s.cardTitle}>Nothing here yet</Text>
           <Text style={s.small}>
@@ -4622,12 +5421,6 @@ export default function FaceFitPrototype() {
               "Your personal information has been saved.",
             );
           }}
-          onLogout={() => {
-            setAuthUser(null);
-            setAuthToken(null);
-            setUserProfile(null);
-            setScreen("login");
-          }}
         />
       ) : (
         <View style={s.dataState}>
@@ -4715,9 +5508,15 @@ export default function FaceFitPrototype() {
                     label="Decline"
                     disabled={ownerBookingUpdating !== null}
                     secondary
-                    onPress={() =>
-                      void changeOwnerBookingStatus(booking.id, "cancelled")
-                    }
+                    onPress={() => setConfirmationPrompt({
+                      eyebrow: "BOOKING REQUEST",
+                      title: "Decline this appointment?",
+                      message: "This request will be marked as cancelled, and the customer will see the update.",
+                      icon: "calendar-outline",
+                      confirmLabel: "Yes, decline",
+                      cancelLabel: "No, keep it",
+                      onConfirm: () => void changeOwnerBookingStatus(booking.id, "cancelled"),
+                    })}
                   />
                 </View>
               )}
@@ -4738,9 +5537,15 @@ export default function FaceFitPrototype() {
                     label="Cancel"
                     disabled={ownerBookingUpdating !== null}
                     secondary
-                    onPress={() =>
-                      void changeOwnerBookingStatus(booking.id, "cancelled")
-                    }
+                    onPress={() => setConfirmationPrompt({
+                      eyebrow: "BOOKING",
+                      title: "Cancel this appointment?",
+                      message: "The confirmed appointment will be marked as cancelled, and the customer will be notified.",
+                      icon: "calendar-outline",
+                      confirmLabel: "Yes, cancel",
+                      cancelLabel: "No, keep it",
+                      onConfirm: () => void changeOwnerBookingStatus(booking.id, "cancelled"),
+                    })}
                   />
                 </View>
               )}
@@ -4748,7 +5553,7 @@ export default function FaceFitPrototype() {
           ))
         ) : (
           <View style={s.empty}>
-            <Ionicons name="calendar-outline" size={40} color="#CDBEC2" />
+            <Ionicons name="calendar-outline" size={40} color="#E6F8C5" />
             <Text style={s.cardTitle}>No client bookings yet</Text>
             <Text style={s.small}>
               Appointments booked from the Teves client page will appear here.
@@ -4849,13 +5654,13 @@ export default function FaceFitPrototype() {
                           style={s.ownerRemoveAction}
                         >
                           {ownerRemoving === `service-${service.id}` ? (
-                            <ActivityIndicator size="small" color="#A33A4E" />
+                            <ActivityIndicator size="small" color="#25430D" />
                           ) : (
                             <>
                               <Ionicons
                                 name="trash-outline"
                                 size={16}
-                                color="#A33A4E"
+                                color="#25430D"
                               />
                               <Text style={s.ownerRemoveActionText}>
                                 Remove
@@ -4870,7 +5675,7 @@ export default function FaceFitPrototype() {
               </View>
             ) : (
               <View style={s.empty}>
-                <Ionicons name="pricetag-outline" size={40} color="#CDBEC2" />
+                <Ionicons name="pricetag-outline" size={40} color="#E6F8C5" />
                 <Text style={s.cardTitle}>No services published</Text>
                 <Text style={s.small}>
                   Add your first service so customers can book it.
@@ -4980,13 +5785,13 @@ export default function FaceFitPrototype() {
                           style={s.ownerRemoveAction}
                         >
                           {ownerRemoving === `staff-${staff.id}` ? (
-                            <ActivityIndicator size="small" color="#A33A4E" />
+                            <ActivityIndicator size="small" color="#25430D" />
                           ) : (
                             <>
                               <Ionicons
                                 name="trash-outline"
                                 size={16}
-                                color="#A33A4E"
+                                color="#25430D"
                               />
                               <Text style={s.ownerRemoveActionText}>
                                 Remove
@@ -5001,7 +5806,7 @@ export default function FaceFitPrototype() {
               </View>
             ) : (
               <View style={s.empty}>
-                <Ionicons name="people-outline" size={40} color="#CDBEC2" />
+                <Ionicons name="people-outline" size={40} color="#E6F8C5" />
                 <Text style={s.cardTitle}>No staff profiles yet</Text>
                 <Text style={s.small}>
                   Add a stylist profile to build your team.
@@ -5058,7 +5863,7 @@ export default function FaceFitPrototype() {
                   {ownerManagement.salon.address}, {ownerManagement.salon.city}
                 </Text>
                 <View style={s.salonRatingRow}>
-                  <Ionicons name="star" size={18} color="#FFD98A" />
+                  <Ionicons name="star" size={18} color="#8BCF35" />
                   <Text style={s.salonRatingText}>
                     {Number(ownerManagement.salon.rating).toFixed(1)}
                   </Text>
@@ -5134,7 +5939,7 @@ export default function FaceFitPrototype() {
               </View>
             ) : (
               <View style={s.empty}>
-                <Ionicons name="images-outline" size={38} color="#CDBEC2" />
+                <Ionicons name="images-outline" size={38} color="#E6F8C5" />
                 <Text style={s.cardTitle}>No portfolio photos yet</Text>
                 <Text style={s.small}>
                   Show customers your salon, team, and finished work.
@@ -5195,7 +6000,7 @@ export default function FaceFitPrototype() {
                         <Ionicons
                           name="trash-outline"
                           size={17}
-                          color="#A33A4E"
+                          color="#25430D"
                         />
                       </Pressable>
                     </View>
@@ -5236,7 +6041,7 @@ export default function FaceFitPrototype() {
           </View>
         ) : (
           <View style={s.empty}>
-            <Ionicons name="star-outline" size={40} color="#CDBEC2" />
+            <Ionicons name="star-outline" size={40} color="#E6F8C5" />
             <Text style={s.cardTitle}>No reviews yet</Text>
             <Text style={s.small}>
               Client reviews for your salon will appear here.
@@ -5322,7 +6127,7 @@ export default function FaceFitPrototype() {
     if (owner && page.includes("Dashboard")) {
       if (authToken && ownerDashboardError?.includes("No salon is linked")) {
         return (
-          <ScreenFrame>
+          <ScreenFrame stickyHeader={false}>
             <OwnerSalonSetupScreen
               token={authToken}
               defaultName={authUser?.fullName || ""}
@@ -5330,17 +6135,17 @@ export default function FaceFitPrototype() {
                 setOwnerDashboardError(null);
                 void Promise.all([loadOwnerDashboard(), loadSalons()]);
               }}
-              onLogout={() => {
+              onLogout={() => requestLogout(() => {
                 setAuthUser(null);
                 setAuthToken(null);
                 setScreen("login");
-              }}
+              })}
             />
           </ScreenFrame>
         );
       }
       return (
-        <ScreenFrame>
+        <ScreenFrame stickyHeader={false}>
           <OwnerDashboardScreen
             dashboard={ownerDashboard}
             user={authUser}
@@ -5351,14 +6156,14 @@ export default function FaceFitPrototype() {
             onNotifications={() => setScreen("owner-notifications")}
             onNavigate={setScreen}
             onReload={() => void loadOwnerDashboard()}
-            onLogout={() => {
+            onLogout={() => requestLogout(() => {
               setAuthUser(null);
               setAuthToken(null);
               setUserProfile(null);
               setOwnerDashboard(null);
               setOwnerManagement(null);
               setScreen("login");
-            }}
+            })}
           />
         </ScreenFrame>
       );
@@ -5499,7 +6304,11 @@ export default function FaceFitPrototype() {
               style={s.splashLogoImage}
             />
           </View>
-          <ActivityIndicator color={C.rose} style={{ marginTop: 38 }} />
+          <Text style={s.splashTagline}>Your style, thoughtfully matched.</Text>
+          <View style={s.splashLoading}>
+            <ActivityIndicator color={C.rose} />
+            <Text style={s.splashLoadingText}>Getting your style studio ready</Text>
+          </View>
         </View>
       </ScreenFrame>
     );
@@ -5509,6 +6318,7 @@ export default function FaceFitPrototype() {
         <OnboardingScreen
           onGetStarted={() => setScreen("signup")}
           onLogin={() => setScreen("login")}
+          onGuest={() => void startGuestScan()}
         />
       </ScreenFrame>
     );
@@ -5517,39 +6327,42 @@ export default function FaceFitPrototype() {
   else if (screen === "consent")
     content = (
       <ScreenFrame>
-        <Header title="Before your scan" onBack={() => setScreen("signup")} />
+        <Header
+          title="Terms & Conditions"
+          onBack={() => setScreen(consentReturnScreen)}
+        />
         <View style={s.consentHero}>
-          <Ionicons name="shield-checkmark" size={52} color={C.rose} />
+          <View style={s.consentHeroTop}>
+            <Text style={s.consentKicker}>TERMS & PRIVACY</Text>
+            <View style={s.consentShield}>
+              <Ionicons name="shield-checkmark" size={23} color={C.roseDark} />
+            </View>
+          </View>
+          <Text style={s.consentHeroTitle}>Your data. Your choice.</Text>
+          <Text style={s.consentHeroCopy}>
+            Review how FaceFit uses your scan photo and location before you continue.
+          </Text>
         </View>
-        <Text style={s.title}>Your face data stays yours</Text>
-        <Text style={s.body}>
-          We use your photo only to analyze facial proportions and recommend
-          hairstyles. You control whether it is saved or deleted.
-        </Text>
+        <Text style={s.eyebrow}>IN PLAIN LANGUAGE</Text>
         {[
           [
-            "camera",
-            "Camera access",
-            "Needed to capture your guided face scan.",
+            "scan-outline",
+            "Face analysis",
+            "A photo you provide helps FaceFit estimate your face shape and recommend hairstyles.",
           ],
           [
-            "location",
-            "Location access",
-            "Used while the app is open to show nearby salons.",
+            "location-outline",
+            "Nearby salons",
+            "Your location is used while FaceFit is open to help find salons close to you.",
           ],
           [
-            "lock-closed",
-            "Private by design",
-            "Images and location are handled securely and never used for ads.",
-          ],
-          [
-            "trash",
-            "Your control",
-            "Delete your scan and results from Settings anytime.",
+            "images-outline",
+            "Your choice of photo",
+            "Use the camera for a guided scan or choose a photo from your gallery.",
           ],
         ].map((x) => (
           <View style={s.consentRow} key={x[0]}>
-            <View style={s.menuIcon}>
+            <View style={s.consentRowIcon}>
               <Ionicons
                 name={x[0] as keyof typeof Ionicons.glyphMap}
                 size={21}
@@ -5562,21 +6375,29 @@ export default function FaceFitPrototype() {
             </View>
           </View>
         ))}
+        <View style={s.consentSectionHeading}>
+          <Text style={s.sectionTitle}>Your permissions</Text>
+          <Text style={s.small}>Choose each permission to continue.</Text>
+        </View>
         <Pressable
           accessibilityRole="checkbox"
           accessibilityState={{ checked: faceAnalysisConsent }}
           onPress={() => setFaceAnalysisConsent((value) => !value)}
-          style={({ pressed }) => [s.checkRow, pressed && s.pressed]}
+          style={({ pressed }) => [
+            s.checkRow,
+            faceAnalysisConsent && s.checkRowActive,
+            pressed && s.pressed,
+          ]}
         >
-          <Ionicons
-            name={faceAnalysisConsent ? "checkbox" : "square-outline"}
-            size={24}
-            color={faceAnalysisConsent ? C.rose : C.muted}
-          />
-          <Text style={[s.small, { flex: 1 }]}>
-            I understand and consent to face-shape analysis as described in the
-            Privacy Notice.
-          </Text>
+          <View style={[s.consentCheck, faceAnalysisConsent && s.consentCheckActive]}>
+            {faceAnalysisConsent && <Ionicons name="checkmark" size={16} color={C.white} />}
+          </View>
+          <View style={s.consentCheckCopy}>
+            <Text style={s.consentCheckTitle}>Face analysis</Text>
+            <Text style={s.small}>
+              I agree that a photo I provide may be analyzed to estimate my face shape and recommend hairstyles.
+            </Text>
+          </View>
         </Pressable>
         <Pressable
           accessibilityRole="checkbox"
@@ -5585,25 +6406,32 @@ export default function FaceFitPrototype() {
           style={({ pressed }) => [
             s.checkRow,
             s.locationCheckRow,
+            locationConsent && s.checkRowActive,
             pressed && s.pressed,
           ]}
         >
-          <Ionicons
-            name={locationConsent ? "checkbox" : "square-outline"}
-            size={24}
-            color={locationConsent ? C.rose : C.muted}
-          />
-          <Text style={[s.small, { flex: 1 }]}>
-            I consent to location access while using the app so FaceFit can show
-            salons near me.
-          </Text>
+          <View style={[s.consentCheck, locationConsent && s.consentCheckActive]}>
+            {locationConsent && <Ionicons name="checkmark" size={16} color={C.white} />}
+          </View>
+          <View style={s.consentCheckCopy}>
+            <Text style={s.consentCheckTitle}>Location while using FaceFit</Text>
+            <Text style={s.small}>
+              I agree to location access while the app is open so FaceFit can show nearby salons.
+            </Text>
+          </View>
         </Pressable>
+        <View style={s.consentNotice}>
+          <Ionicons name="information-circle-outline" size={19} color={C.roseDark} />
+          <Text style={s.consentNoticeText}>
+            Saved on this device for your FaceFit account, so you won’t be asked again the next time you log in here.
+          </Text>
+        </View>
+        {consentError && <Text accessibilityRole="alert" style={s.consentError}>{consentError}</Text>}
         <Button
-          label="Agree & continue"
-          disabled={!faceAnalysisConsent || !locationConsent}
-          onPress={() => setScreen("home")}
+          label={consentSaving ? "Saving your agreement..." : "Agree & continue"}
+          disabled={!faceAnalysisConsent || !locationConsent || consentSaving}
+          onPress={() => void acceptConsent()}
         />
-        <Text style={[s.link, s.centerText]}>Read the full Privacy Notice</Text>
       </ScreenFrame>
     );
   else if (screen === "home") content = home;
@@ -5672,7 +6500,7 @@ export default function FaceFitPrototype() {
     >
       <StatusBar style={screen === "scan" ? "light" : "dark"} />
       <View style={[s.appViewport, isDesktopWeb && s.appViewportDesktop]}>
-        {isDesktopWeb && showAppNavigation && (
+        {isDesktopWeb && showAppNavigation && !isGuestAccount && (
           <DesktopNavigation screen={screen} go={setScreen} />
         )}
         <View style={s.contentViewport}>{content}</View>
@@ -5735,19 +6563,23 @@ export default function FaceFitPrototype() {
         error={ownerEditorError}
         onSave={() => void saveOwnerEditor()}
       />
+      <ConfirmationPrompt
+        prompt={confirmationPrompt}
+        onDismiss={() => setConfirmationPrompt(null)}
+      />
       <FavoriteToast toast={favoriteToast} onDismiss={dismissFavoriteToast} />
     </KeyboardAvoidingView>
   );
 }
 
 const s = StyleSheet.create({
-  app: { flex: 1, width: "100%", backgroundColor: "#EFE8E8" },
+  app: { flex: 1, width: "100%", backgroundColor: "#F7FAF4" },
   appViewport: { flex: 1, width: "100%" },
   appViewportDesktop: {
     width: "100%",
     alignSelf: "stretch",
     flexDirection: "row",
-    backgroundColor: C.pale,
+    backgroundColor: "#F7FAF4",
   },
   contentViewport: { flex: 1, minWidth: 0, width: "100%" },
   webShell: {
@@ -5755,14 +6587,14 @@ const s = StyleSheet.create({
     width: "100%",
     maxWidth: 430,
     alignSelf: "center",
-    backgroundColor: C.pale,
+    backgroundColor: "#F7FAF4",
     overflow: "hidden",
   },
   webShellWeb: { maxWidth: "100%", alignSelf: "stretch" },
   webShellDesktop: { maxWidth: "100%", alignSelf: "stretch" },
   safe: { flex: 1, width: "100%" },
-  scroll: { padding: 20, paddingBottom: 120 },
-  scrollDesktop: { paddingHorizontal: 48, paddingTop: 30, paddingBottom: 60 },
+  scroll: { paddingHorizontal: 22, paddingTop: 20, paddingBottom: 132 },
+  scrollDesktop: { paddingHorizontal: 56, paddingTop: 36, paddingBottom: 72 },
   pressed: { opacity: 0.82, transform: [{ scale: 0.985 }] },
   desktopNavRail: { width: 76, height: "100%", zIndex: 5 },
   desktopNav: {
@@ -5770,13 +6602,13 @@ const s = StyleSheet.create({
     left: 0,
     top: 0,
     bottom: 0,
-    backgroundColor: C.white,
+    backgroundColor: "#FBFDF9",
     borderRightWidth: 1,
     borderRightColor: C.line,
     overflow: "hidden",
-    shadowColor: "#4B2732",
-    shadowOpacity: 0.12,
-    shadowRadius: 18,
+    shadowColor: "#25430D",
+    shadowOpacity: 0.08,
+    shadowRadius: 24,
     elevation: 8,
     zIndex: 5,
   },
@@ -5798,14 +6630,14 @@ const s = StyleSheet.create({
     fontSize: 10,
     fontWeight: "800",
     letterSpacing: 1.4,
-    color: "#A89DA0",
+    color: "#397A24",
     marginLeft: 12,
     marginBottom: 10,
   },
   desktopNavItems: { gap: 7 },
   desktopNavItem: {
-    height: 48,
-    borderRadius: 14,
+    height: 50,
+    borderRadius: 16,
     paddingHorizontal: 4,
     flexDirection: "row",
     alignItems: "center",
@@ -5829,22 +6661,48 @@ const s = StyleSheet.create({
     marginTop: "auto",
     padding: 17,
     borderRadius: 18,
-    backgroundColor: "#FFF3DA",
+    backgroundColor: "#E6F8C5",
     gap: 6,
     minWidth: 220,
   },
   header: {
-    height: 56,
+    minHeight: 64,
+    zIndex: 10,
+    backgroundColor: "#F7FAF4",
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginBottom: 18,
+    marginBottom: 20,
   },
-  headerTitle: { fontSize: 17, fontWeight: "700", color: C.ink },
+  profileHeaderWrap: { zIndex: 20 },
+  profileHeaderMenu: {
+    position: "absolute",
+    top: 56,
+    right: 0,
+    minWidth: 176,
+    paddingVertical: 6,
+    borderRadius: 14,
+    backgroundColor: C.white,
+    borderWidth: 1,
+    borderColor: C.line,
+    shadowColor: "#000",
+    shadowOpacity: 0.12,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 5 },
+    elevation: 8,
+  },
+  profileHeaderMenuItem: {
+    minHeight: 46,
+    paddingHorizontal: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  headerTitle: { fontSize: 18, fontWeight: "800", color: C.ink, letterSpacing: -0.35 },
   iconButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 44,
+    height: 44,
+    borderRadius: 16,
     backgroundColor: C.white,
     alignItems: "center",
     justifyContent: "center",
@@ -5858,7 +6716,7 @@ const s = StyleSheet.create({
     minWidth: 20,
     height: 20,
     borderRadius: 10,
-    backgroundColor: "#C52F5D",
+    backgroundColor: "#397A24",
     borderWidth: 2,
     borderColor: C.white,
     paddingHorizontal: 4,
@@ -5870,12 +6728,12 @@ const s = StyleSheet.create({
     minWidth: 25,
     height: 25,
     borderRadius: 13,
-    backgroundColor: "#C52F5D",
+    backgroundColor: "#397A24",
     paddingHorizontal: 7,
     alignItems: "center",
     justifyContent: "center",
   },
-  favoriteButtonActive: { backgroundColor: C.blush, borderColor: "#E4B5C1" },
+  favoriteButtonActive: { backgroundColor: C.blush, borderColor: "#E6F8C5" },
   favoritePressed: { transform: [{ scale: 0.9 }] },
   logoSmall: {
     width: 46,
@@ -5887,10 +6745,10 @@ const s = StyleSheet.create({
     overflow: "hidden",
   },
   logoImageSmall: { width: "100%", height: "100%", resizeMode: "contain" },
-  title: { fontSize: 25, lineHeight: 31, fontWeight: "800", color: C.ink },
+  title: { fontSize: 28, lineHeight: 34, fontWeight: "800", color: C.ink, letterSpacing: -0.6 },
   display: {
-    fontSize: 38,
-    lineHeight: 46,
+    fontSize: 40,
+    lineHeight: 47,
     fontWeight: "800",
     color: C.ink,
     marginBottom: 10,
@@ -5909,7 +6767,7 @@ const s = StyleSheet.create({
   mutedLink: { color: C.muted, fontSize: 14, fontWeight: "700" },
   centerText: { textAlign: "center" },
   button: {
-    minHeight: 54,
+    minHeight: 56,
     borderRadius: 18,
     backgroundColor: C.rose,
     flexDirection: "row",
@@ -5917,12 +6775,17 @@ const s = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: 18,
-    marginTop: 12,
+    marginTop: 14,
+    shadowColor: C.roseDark,
+    shadowOpacity: 0.16,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 5 },
+    elevation: 4,
   },
   buttonSecondary: {
     backgroundColor: C.white,
     borderWidth: 1,
-    borderColor: "#DDBFC7",
+    borderColor: "#DCEBC8",
   },
   buttonDisabled: { opacity: 0.45 },
   buttonText: { fontSize: 16, fontWeight: "800", color: C.white },
@@ -5934,19 +6797,22 @@ const s = StyleSheet.create({
     backgroundColor: C.pale,
   },
   logo: {
-    width: 260,
-    height: 260,
-    borderRadius: 36,
-    backgroundColor: C.white,
+    width: 244,
+    height: 244,
+    borderRadius: 76,
+    backgroundColor: "#F7FAF4",
     alignItems: "center",
     justifyContent: "center",
     overflow: "hidden",
     shadowColor: C.rose,
-    shadowOpacity: 0.18,
-    shadowRadius: 24,
-    elevation: 8,
+    shadowOpacity: 0.12,
+    shadowRadius: 32,
+    elevation: 10,
   },
   splashLogoImage: { width: "100%", height: "100%", resizeMode: "contain" },
+  splashTagline: { fontSize: 15, fontWeight: "700", color: C.roseDark, letterSpacing: -0.15, marginTop: 19 },
+  splashLoading: { alignItems: "center", gap: 12, marginTop: 36 },
+  splashLoadingText: { fontSize: 11, fontWeight: "700", color: C.muted },
   authSwitch: {
     textAlign: "center",
     color: C.roseDark,
@@ -5954,10 +6820,23 @@ const s = StyleSheet.create({
     fontSize: 14,
     marginTop: 22,
   },
+  guestLoginButton: {
+    minHeight: 52,
+    marginTop: 18,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: C.line,
+    backgroundColor: C.white,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 9,
+  },
+  guestLoginText: { color: C.roseDark, fontSize: 14, fontWeight: "800" },
   authError: {
     padding: 13,
     borderRadius: 14,
-    backgroundColor: "#FCE8EC",
+    backgroundColor: "#E6F8C5",
     flexDirection: "row",
     alignItems: "center",
     gap: 9,
@@ -5967,7 +6846,7 @@ const s = StyleSheet.create({
     flex: 1,
     fontSize: 13,
     lineHeight: 19,
-    color: "#81263A",
+    color: "#25430D",
     fontWeight: "600",
   },
   accountTypeLabel: {
@@ -5979,9 +6858,9 @@ const s = StyleSheet.create({
   accountTypeRow: { flexDirection: "row", gap: 10, marginBottom: 16 },
   accountTypeCard: {
     flex: 1,
-    minHeight: 125,
-    padding: 14,
-    borderRadius: 17,
+    minHeight: 138,
+    padding: 16,
+    borderRadius: 22,
     backgroundColor: C.white,
     borderWidth: 1,
     borderColor: C.line,
@@ -5990,18 +6869,22 @@ const s = StyleSheet.create({
   accountTypeCardActive: {
     borderWidth: 2,
     borderColor: C.rose,
-    backgroundColor: "#FFF9FA",
+    backgroundColor: "#FFFFFF",
   },
   accountTypeTitle: { fontSize: 14, fontWeight: "800", color: C.ink },
   accountTypeTitleActive: { color: C.roseDark },
   accountTypeCaption: { fontSize: 11, lineHeight: 16, color: C.muted },
   authIntro: { marginVertical: 15 },
   field: {
-    height: 56,
-    borderRadius: 17,
+    height: 60,
+    borderRadius: 18,
     backgroundColor: C.white,
     borderWidth: 1,
     borderColor: C.line,
+    shadowColor: C.roseDark,
+    shadowOpacity: 0.025,
+    shadowRadius: 8,
+    elevation: 1,
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 16,
@@ -6027,7 +6910,7 @@ const s = StyleSheet.create({
     backgroundColor: C.white,
     borderWidth: 1,
     borderStyle: "dashed",
-    borderColor: "#D9B4BE",
+    borderColor: "#DCEBC8",
     padding: 12,
     flexDirection: "row",
     alignItems: "center",
@@ -6051,24 +6934,109 @@ const s = StyleSheet.create({
   coordinateRow: { flexDirection: "row", gap: 10 },
   coordinateField: { flex: 1, minWidth: 0 },
   consentHero: {
-    height: 150,
+    minHeight: 205,
     borderRadius: 28,
+    backgroundColor: C.roseDark,
+    padding: 22,
+    justifyContent: "space-between",
+    marginBottom: 25,
+  },
+  consentHeroTop: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 14,
+  },
+  consentKicker: {
+    fontSize: 9,
+    fontWeight: "900",
+    letterSpacing: 1.25,
+    color: "#E6F8C5",
+  },
+  consentShield: {
+    width: 42,
+    height: 42,
+    borderRadius: 15,
     backgroundColor: C.blush,
     alignItems: "center",
     justifyContent: "center",
-    marginBottom: 24,
   },
-  consentRow: { flexDirection: "row", gap: 13, marginTop: 18 },
+  consentHeroTitle: {
+    fontSize: 27,
+    lineHeight: 32,
+    fontWeight: "900",
+    letterSpacing: -0.45,
+    color: C.white,
+  },
+  consentHeroCopy: {
+    fontSize: 12,
+    lineHeight: 18,
+    color: "#E6F8C5",
+    marginTop: 7,
+  },
+  consentRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingVertical: 13,
+    borderBottomWidth: 1,
+    borderBottomColor: C.line,
+  },
+  consentRowIcon: {
+    width: 42,
+    height: 42,
+    borderRadius: 14,
+    backgroundColor: C.blush,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  consentSectionHeading: { marginTop: 17, marginBottom: 4 },
   checkRow: {
-    padding: 15,
-    borderRadius: 16,
+    minHeight: 90,
+    padding: 16,
+    borderRadius: 20,
     backgroundColor: C.white,
+    borderWidth: 1,
+    borderColor: C.line,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 13,
+    marginTop: 12,
+  },
+  checkRowActive: { borderColor: C.rose, backgroundColor: "#FBFDF9" },
+  consentCheck: {
+    width: 24,
+    height: 24,
+    borderRadius: 8,
+    borderWidth: 1.5,
+    borderColor: C.line,
+    backgroundColor: C.white,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  consentCheckActive: { backgroundColor: C.rose, borderColor: C.rose },
+  consentCheckCopy: { flex: 1, gap: 4 },
+  consentCheckTitle: { fontSize: 13, fontWeight: "900", color: C.ink },
+  locationCheckRow: { marginTop: 10 },
+  consentNotice: {
     flexDirection: "row",
     alignItems: "flex-start",
-    gap: 11,
-    marginTop: 25,
+    gap: 9,
+    padding: 13,
+    borderRadius: 16,
+    backgroundColor: C.blush,
+    marginTop: 15,
   },
-  locationCheckRow: { marginTop: 10 },
+  consentNoticeText: { flex: 1, fontSize: 11, lineHeight: 17, color: C.roseDark },
+  consentError: {
+    padding: 12,
+    borderRadius: 14,
+    backgroundColor: C.blush,
+    color: C.roseDark,
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: 12,
+  },
   menuIcon: {
     width: 42,
     height: 42,
@@ -6083,7 +7051,7 @@ const s = StyleSheet.create({
     justifyContent: "space-between",
     marginBottom: 22,
   },
-  greeting: { fontSize: 25, fontWeight: "800", color: C.ink, marginBottom: 3 },
+  greeting: { fontSize: 28, fontWeight: "800", letterSpacing: -0.55, color: C.ink, marginBottom: 4 },
   avatar: {
     width: 46,
     height: 46,
@@ -6093,20 +7061,20 @@ const s = StyleSheet.create({
     justifyContent: "center",
   },
   hero: {
-    minHeight: 210,
-    borderRadius: 24,
+    minHeight: 230,
+    borderRadius: 30,
     backgroundColor: C.roseDark,
-    padding: 22,
+    padding: 24,
     flexDirection: "row",
     alignItems: "center",
     overflow: "hidden",
-    marginBottom: 28,
+    marginBottom: 30,
   },
   heroKicker: {
     fontSize: 10,
     fontWeight: "800",
     letterSpacing: 1.1,
-    color: "#F2C7D2",
+    color: "#E6F8C5",
     marginBottom: 8,
   },
   heroTitle: {
@@ -6119,8 +7087,8 @@ const s = StyleSheet.create({
   heroButton: {
     marginTop: 20,
     alignSelf: "flex-start",
-    height: 42,
-    borderRadius: 14,
+    height: 46,
+    borderRadius: 16,
     backgroundColor: C.white,
     paddingHorizontal: 14,
     flexDirection: "row",
@@ -6135,7 +7103,7 @@ const s = StyleSheet.create({
     width: 130,
     height: 170,
     borderWidth: 2,
-    borderColor: "#D88A9E",
+    borderColor: "#8BCF35",
     borderRadius: 70,
     alignItems: "center",
     justifyContent: "center",
@@ -6163,7 +7131,7 @@ const s = StyleSheet.create({
   art: { width: "100%", borderRadius: 20, resizeMode: "cover" },
   artCrop: {
     width: "100%",
-    borderRadius: 18,
+    borderRadius: 22,
     overflow: "hidden",
     backgroundColor: C.blush,
   },
@@ -6183,16 +7151,21 @@ const s = StyleSheet.create({
   overlayText: { color: C.white, fontSize: 12, fontWeight: "700" },
   hRow: { gap: 12, paddingRight: 10 },
   salonCard: {
-    width: 150,
-    padding: 10,
-    borderRadius: 18,
+    width: 174,
+    padding: 11,
+    borderRadius: 22,
     backgroundColor: C.white,
     borderWidth: 1,
     borderColor: C.line,
+    shadowColor: C.roseDark,
+    shadowOpacity: 0.045,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 5 },
+    elevation: 2,
   },
   salonThumb: {
-    height: 85,
-    borderRadius: 14,
+    height: 104,
+    borderRadius: 16,
     alignItems: "center",
     justifyContent: "center",
     marginBottom: 9,
@@ -6216,7 +7189,7 @@ const s = StyleSheet.create({
     marginTop: 25,
     padding: 16,
     borderRadius: 18,
-    backgroundColor: "#FFF3DA",
+    backgroundColor: "#E6F8C5",
     flexDirection: "row",
     gap: 12,
   },
@@ -6230,20 +7203,23 @@ const s = StyleSheet.create({
   tabBar: {
     width: "100%",
     maxWidth: 430,
-    height: 82,
-    paddingBottom: 15,
+    height: 76,
+    marginBottom: 8,
+    paddingBottom: 7,
     backgroundColor: C.white,
-    borderTopWidth: 1,
-    borderTopColor: C.line,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: C.line,
     flexDirection: "row",
-    shadowColor: "#000",
-    shadowOpacity: 0.08,
-    shadowRadius: 16,
-    elevation: 12,
+    shadowColor: C.roseDark,
+    shadowOpacity: 0.1,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 5 },
+    elevation: 8,
   },
   tabBarWeb: { maxWidth: "100%" },
-  tabItem: { flex: 1, alignItems: "center", justifyContent: "center", gap: 3 },
-  tabLabel: { fontSize: 11, fontWeight: "600", color: C.muted },
+  tabItem: { flex: 1, alignItems: "center", justifyContent: "center", gap: 4 },
+  tabLabel: { fontSize: 10, fontWeight: "700", color: C.muted },
   tabActive: { color: C.rose, fontWeight: "800" },
   centerPage: {
     flex: 1,
@@ -6278,7 +7254,7 @@ const s = StyleSheet.create({
     height: 21,
     borderRadius: 11,
     borderWidth: 2,
-    borderColor: "#D8C9CD",
+    borderColor: "#DCEBC8",
     alignItems: "center",
     justifyContent: "center",
   },
@@ -6341,7 +7317,7 @@ const s = StyleSheet.create({
     borderRadius: 18,
     backgroundColor: C.white,
     borderWidth: 1,
-    borderColor: "#E2C8CF",
+    borderColor: "#DCEBC8",
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
@@ -6369,11 +7345,16 @@ const s = StyleSheet.create({
   },
   recCard: {
     backgroundColor: C.white,
-    borderRadius: 20,
+    borderRadius: 24,
     overflow: "hidden",
     marginBottom: 14,
     borderWidth: 1,
     borderColor: C.line,
+    shadowColor: C.roseDark,
+    shadowOpacity: 0.05,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 2,
   },
   recBody: { padding: 14, paddingTop: 50 },
   matchBadge: {
@@ -6438,7 +7419,7 @@ const s = StyleSheet.create({
   segment: {
     height: 48,
     borderRadius: 15,
-    backgroundColor: "#EEE6E7",
+    backgroundColor: "#F4FAEB",
     padding: 4,
     flexDirection: "row",
     marginBottom: 17,
@@ -6463,7 +7444,7 @@ const s = StyleSheet.create({
   mapMock: {
     height: 150,
     borderRadius: 22,
-    backgroundColor: "#EFE6E0",
+    backgroundColor: "#F4FAEB",
     alignItems: "center",
     justifyContent: "center",
     marginBottom: 14,
@@ -6480,9 +7461,48 @@ const s = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  listCard: {
-    minHeight: 82,
+  listCardClosed: { backgroundColor: "#F4FAEB", borderColor: "#DCEBC8" },
+  salonClosedDim: { opacity: 0.5 },
+  closedBadge: {
+    alignSelf: "flex-start",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    marginTop: 6,
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    borderRadius: 9,
+    backgroundColor: "#E6F8C5",
+  },
+  closedBadgeText: { fontSize: 11, fontWeight: "800", color: "#25430D" },
+  privacyCallout: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 12,
+    padding: 14,
     borderRadius: 18,
+    backgroundColor: C.blush,
+    borderWidth: 1,
+    borderColor: "#DCEBC8",
+    marginBottom: 6,
+  },
+  privacyCalloutTitle: {
+    fontSize: 14,
+    fontWeight: "900",
+    color: C.roseDark,
+    marginBottom: 6,
+  },
+  privacyHeading: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: C.ink,
+    marginTop: 16,
+    marginBottom: 5,
+  },
+  privacyText: { fontSize: 13, lineHeight: 20, color: C.muted },
+  listCard: {
+    minHeight: 88,
+    borderRadius: 20,
     backgroundColor: C.white,
     borderWidth: 1,
     borderColor: C.line,
@@ -6491,6 +7511,11 @@ const s = StyleSheet.create({
     alignItems: "center",
     gap: 12,
     marginBottom: 12,
+    shadowColor: C.roseDark,
+    shadowOpacity: 0.035,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 1,
   },
   listFavorite: {
     width: 40,
@@ -6562,8 +7587,8 @@ const s = StyleSheet.create({
     marginBottom: 16,
   },
   salonHero: {
-    height: 250,
-    borderRadius: 23,
+    height: 280,
+    borderRadius: 28,
     overflow: "hidden",
     marginBottom: 14,
   },
@@ -6649,10 +7674,10 @@ const s = StyleSheet.create({
   },
   salonLogoTextLarge: { fontSize: 16 },
   salonProfileHero: {
-    minHeight: 220,
-    borderRadius: 28,
+    minHeight: 236,
+    borderRadius: 30,
     backgroundColor: C.roseDark,
-    padding: 25,
+    padding: 28,
     flexDirection: "row",
     alignItems: "center",
     gap: 22,
@@ -6668,8 +7693,8 @@ const s = StyleSheet.create({
   },
   salonRatingRow: { flexDirection: "row", alignItems: "center", gap: 6 },
   salonRatingText: { fontSize: 16, fontWeight: "900", color: C.white },
-  salonHeroMeta: { fontSize: 12, fontWeight: "600", color: "#F3C9D3" },
-  salonHeroAddress: { fontSize: 13, lineHeight: 19, color: "#F8E6EA" },
+  salonHeroMeta: { fontSize: 12, fontWeight: "600", color: "#E6F8C5" },
+  salonHeroAddress: { fontSize: 13, lineHeight: 19, color: "#E6F8C5" },
   salonInfoGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
@@ -6679,13 +7704,18 @@ const s = StyleSheet.create({
   salonInfoCard: {
     flexGrow: 1,
     flexBasis: Platform.OS === "web" ? 180 : 100,
-    minHeight: 108,
-    borderRadius: 18,
+    minHeight: 116,
+    borderRadius: 20,
     backgroundColor: C.white,
     borderWidth: 1,
     borderColor: C.line,
     padding: 14,
     gap: 4,
+    shadowColor: C.roseDark,
+    shadowOpacity: 0.035,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 1,
   },
   salonInfoLabel: {
     fontSize: 10,
@@ -6698,7 +7728,7 @@ const s = StyleSheet.create({
   salonAbout: {
     padding: 18,
     borderRadius: 20,
-    backgroundColor: "#FFF0F3",
+    backgroundColor: "#E6F8C5",
     marginBottom: 8,
   },
   salonSectionKicker: {
@@ -6711,7 +7741,7 @@ const s = StyleSheet.create({
   salonLoadWarning: {
     padding: 14,
     borderRadius: 16,
-    backgroundColor: "#FCE8EC",
+    backgroundColor: "#E6F8C5",
     flexDirection: "row",
     alignItems: "center",
     gap: 9,
@@ -6721,8 +7751,8 @@ const s = StyleSheet.create({
   salonServiceCard: {
     flexGrow: 1,
     flexBasis: Platform.OS === "web" ? 280 : "100%",
-    minHeight: 112,
-    borderRadius: 20,
+    minHeight: 120,
+    borderRadius: 22,
     backgroundColor: C.white,
     borderWidth: 1,
     borderColor: C.line,
@@ -6730,6 +7760,11 @@ const s = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 12,
+    shadowColor: C.roseDark,
+    shadowOpacity: 0.035,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 1,
   },
   salonServiceIcon: {
     width: 45,
@@ -6753,7 +7788,7 @@ const s = StyleSheet.create({
     backgroundColor: C.white,
     borderWidth: 1,
     borderStyle: "dashed",
-    borderColor: "#D9CACE",
+    borderColor: "#DCEBC8",
     padding: 16,
     flexDirection: "row",
     alignItems: "center",
@@ -6762,8 +7797,8 @@ const s = StyleSheet.create({
   staffCard: {
     flexGrow: 1,
     flexBasis: Platform.OS === "web" ? 280 : "100%",
-    minHeight: 98,
-    borderRadius: 20,
+    minHeight: 106,
+    borderRadius: 22,
     backgroundColor: C.white,
     borderWidth: 1,
     borderColor: C.line,
@@ -6771,11 +7806,16 @@ const s = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 12,
+    shadowColor: C.roseDark,
+    shadowOpacity: 0.035,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 1,
   },
   staffCardSelected: {
     borderWidth: 2,
     borderColor: C.rose,
-    backgroundColor: "#FFF8FA",
+    backgroundColor: "#FFFFFF",
   },
   staffAvatar: {
     width: 50,
@@ -6800,7 +7840,7 @@ const s = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 99,
-    backgroundColor: "#E8F3ED",
+    backgroundColor: "#E6F8C5",
     flexDirection: "row",
     alignItems: "center",
     gap: 5,
@@ -6837,7 +7877,7 @@ const s = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 7,
     borderRadius: 99,
-    backgroundColor: "#FFF3DA",
+    backgroundColor: "#E6F8C5",
     flexDirection: "row",
     alignItems: "center",
     gap: 5,
@@ -6845,11 +7885,16 @@ const s = StyleSheet.create({
   reviewSummaryText: { fontSize: 11, fontWeight: "800", color: C.ink },
   reviewList: { gap: 10 },
   reviewCard: {
-    padding: 16,
-    borderRadius: 19,
+    padding: 18,
+    borderRadius: 22,
     backgroundColor: C.white,
     borderWidth: 1,
     borderColor: C.line,
+    shadowColor: C.roseDark,
+    shadowOpacity: 0.035,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 1,
   },
   reviewTop: { flexDirection: "row", alignItems: "center", gap: 10 },
   reviewAvatar: {
@@ -6880,12 +7925,17 @@ const s = StyleSheet.create({
     backgroundColor: C.blush,
   },
   reviewComposer: {
-    padding: 18,
-    borderRadius: 22,
+    padding: 20,
+    borderRadius: 24,
     backgroundColor: C.white,
     borderWidth: 1,
     borderColor: C.line,
     marginTop: 14,
+    shadowColor: C.roseDark,
+    shadowOpacity: 0.04,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 5 },
+    elevation: 1,
   },
   reviewPicker: { flexDirection: "row", gap: 7, marginVertical: 13 },
   reviewPhotoPicker: {
@@ -6893,8 +7943,8 @@ const s = StyleSheet.create({
     borderRadius: 17,
     borderWidth: 1,
     borderStyle: "dashed",
-    borderColor: "#D9B4BE",
-    backgroundColor: "#FFF8FA",
+    borderColor: "#DCEBC8",
+    backgroundColor: "#FFFFFF",
     padding: 12,
     flexDirection: "row",
     alignItems: "center",
@@ -6951,15 +8001,15 @@ const s = StyleSheet.create({
   progress: {
     height: 5,
     borderRadius: 3,
-    backgroundColor: "#E7D9DC",
+    backgroundColor: "#F4FAEB",
     overflow: "hidden",
     marginBottom: 12,
   },
   progressFill: { width: "66%", height: "100%", backgroundColor: C.rose },
   choiceCard: {
-    minHeight: 78,
-    padding: 13,
-    borderRadius: 18,
+    minHeight: 86,
+    padding: 15,
+    borderRadius: 20,
     backgroundColor: C.white,
     borderWidth: 1,
     borderColor: C.line,
@@ -6967,11 +8017,16 @@ const s = StyleSheet.create({
     alignItems: "center",
     gap: 12,
     marginBottom: 12,
+    shadowColor: C.roseDark,
+    shadowOpacity: 0.035,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 1,
   },
   choiceSelected: {
     borderWidth: 2,
     borderColor: C.rose,
-    backgroundColor: "#FFF9FA",
+    backgroundColor: "#FFFFFF",
   },
   choiceIcon: {
     width: 48,
@@ -7000,7 +8055,7 @@ const s = StyleSheet.create({
   dayActive: { backgroundColor: C.rose },
   dayText: { fontSize: 13, fontWeight: "700", color: C.ink },
   dayTextActive: { color: C.white },
-  dayTextDisabled: { color: "#CFC5C8" },
+  dayTextDisabled: { color: "#DCEBC8" },
   timeGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
@@ -7009,22 +8064,27 @@ const s = StyleSheet.create({
   },
   time: {
     width: "31%",
-    paddingVertical: 13,
-    borderRadius: 13,
+    paddingVertical: 15,
+    borderRadius: 15,
     backgroundColor: C.white,
     alignItems: "center",
     borderWidth: 1,
     borderColor: C.line,
   },
   timeActive: { backgroundColor: C.rose, borderColor: C.rose },
-  timeDisabled: { backgroundColor: "#F2EDEE", borderColor: "#EBE4E6" },
+  timeDisabled: { backgroundColor: "#F4FAEB", borderColor: "#DCEBC8" },
   timeTextActive: { color: C.white },
   summaryCard: {
-    padding: 20,
-    borderRadius: 22,
+    padding: 22,
+    borderRadius: 26,
     backgroundColor: C.white,
     borderWidth: 1,
     borderColor: C.line,
+    shadowColor: C.roseDark,
+    shadowOpacity: 0.06,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 2,
   },
   summaryLogo: {
     width: 58,
@@ -7063,15 +8123,22 @@ const s = StyleSheet.create({
   ticket: {
     width: "100%",
     padding: 20,
-    borderRadius: 20,
+    borderRadius: 26,
     backgroundColor: C.white,
     alignItems: "center",
     marginVertical: 15,
+    borderWidth: 1,
+    borderColor: C.line,
+    shadowColor: C.roseDark,
+    shadowOpacity: 0.05,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 2,
   },
   notificationList: { gap: 10 },
   notificationCard: {
     minHeight: 92,
-    borderRadius: 19,
+    borderRadius: 22,
     backgroundColor: C.white,
     borderWidth: 1,
     borderColor: C.line,
@@ -7079,10 +8146,15 @@ const s = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 12,
+    shadowColor: C.roseDark,
+    shadowOpacity: 0.035,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 1,
   },
   notificationCardUnread: {
-    backgroundColor: "#FFF1F5",
-    borderColor: "#E7AFC0",
+    backgroundColor: "#FFFFFF",
+    borderColor: "#E6F8C5",
     borderWidth: 1.5,
   },
   notificationIcon: {
@@ -7131,12 +8203,17 @@ const s = StyleSheet.create({
     color: C.roseDark,
   },
   bookingCard: {
-    padding: 19,
-    borderRadius: 21,
+    padding: 21,
+    borderRadius: 24,
     backgroundColor: C.white,
     borderWidth: 1,
     borderColor: C.line,
     marginBottom: 22,
+    shadowColor: C.roseDark,
+    shadowOpacity: 0.04,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 5 },
+    elevation: 1,
   },
   bookingActions: { flexDirection: "row", justifyContent: "space-around" },
   bookingMeta: { flexDirection: "row", alignItems: "center", gap: 12 },
@@ -7146,7 +8223,7 @@ const s = StyleSheet.create({
     fontWeight: "800",
     textTransform: "uppercase",
     color: C.green,
-    backgroundColor: "#E8F3ED",
+    backgroundColor: "#E6F8C5",
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 99,
@@ -7181,12 +8258,12 @@ const s = StyleSheet.create({
     fontSize: 10,
     fontWeight: "800",
     color: C.green,
-    backgroundColor: "#E8F3ED",
+    backgroundColor: "#E6F8C5",
     paddingHorizontal: 8,
     paddingVertical: 5,
     borderRadius: 99,
   },
-  ownerStateOff: { color: C.muted, backgroundColor: "#EEE8EA" },
+  ownerStateOff: { color: C.muted, backgroundColor: "#F4FAEB" },
   ownerProfileGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
@@ -7199,14 +8276,19 @@ const s = StyleSheet.create({
     borderRadius: 20,
     borderStyle: "dashed",
     borderWidth: 1,
-    borderColor: "#D9CACE",
+    borderColor: "#DCEBC8",
     gap: 6,
   },
   profileHead: {
     flexDirection: "row",
     alignItems: "center",
     gap: 15,
-    marginBottom: 22,
+    marginBottom: 26,
+    padding: 18,
+    borderRadius: 24,
+    backgroundColor: C.white,
+    borderWidth: 1,
+    borderColor: C.line,
   },
   profileAvatar: {
     width: 74,
@@ -7237,11 +8319,16 @@ const s = StyleSheet.create({
   roleCard: {
     flex: 1,
     padding: 17,
-    borderRadius: 18,
+    borderRadius: 22,
     backgroundColor: C.white,
     borderWidth: 1,
     borderColor: C.line,
     gap: 10,
+    shadowColor: C.roseDark,
+    shadowOpacity: 0.04,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 1,
   },
   stats: { flexDirection: "row", gap: 10, marginVertical: 20 },
   stat: {
@@ -7253,10 +8340,10 @@ const s = StyleSheet.create({
   },
   statValue: { fontSize: 21, fontWeight: "900", color: C.roseDark },
   ownerDashboardHero: {
-    minHeight: 220,
-    borderRadius: 28,
+    minHeight: 238,
+    borderRadius: 30,
     backgroundColor: C.roseDark,
-    padding: 23,
+    padding: 25,
     overflow: "hidden",
     marginBottom: 25,
   },
@@ -7301,16 +8388,16 @@ const s = StyleSheet.create({
     width: 7,
     height: 7,
     borderRadius: 4,
-    backgroundColor: "#9FD7BD",
+    backgroundColor: "#8BCF35",
   },
   ownerHeroBadgeText: {
     fontSize: 9,
     fontWeight: "900",
     letterSpacing: 1.05,
-    color: "#FBEAF0",
+    color: "#E6F8C5",
   },
   ownerHeroStatus: { flexDirection: "row", alignItems: "center", gap: 5 },
-  ownerHeroStatusText: { fontSize: 10, fontWeight: "800", color: "#D8F3E6" },
+  ownerHeroStatusText: { fontSize: 10, fontWeight: "800", color: "#8BCF35" },
   ownerHeroIdentity: { flexDirection: "row", alignItems: "center", gap: 17 },
   ownerDashboardPhoto: {
     width: 86,
@@ -7335,7 +8422,7 @@ const s = StyleSheet.create({
   ownerHeroGreeting: {
     fontSize: 13,
     fontWeight: "600",
-    color: "#F3CCD6",
+    color: "#E6F8C5",
     marginBottom: 4,
   },
   ownerHeroTitle: {
@@ -7352,7 +8439,7 @@ const s = StyleSheet.create({
     marginTop: 12,
     maxWidth: 500,
   },
-  ownerHeroMetaText: { flexShrink: 1, fontSize: 12, color: "#F3CCD6" },
+  ownerHeroMetaText: { flexShrink: 1, fontSize: 12, color: "#E6F8C5" },
   ownerDashboardState: {
     minHeight: 145,
     borderRadius: 20,
@@ -7387,7 +8474,7 @@ const s = StyleSheet.create({
     paddingHorizontal: 9,
     paddingVertical: 6,
     borderRadius: 99,
-    backgroundColor: "#E8F3ED",
+    backgroundColor: "#E6F8C5",
   },
   ownerUpdatedText: { fontSize: 9, fontWeight: "900", color: C.green },
   ownerMetricsGrid: {
@@ -7399,13 +8486,13 @@ const s = StyleSheet.create({
   ownerMetricCard: {
     flexGrow: 1,
     minWidth: 135,
-    minHeight: 158,
-    borderRadius: 21,
+    minHeight: 144,
+    borderRadius: 23,
     backgroundColor: C.white,
     borderWidth: 1,
     borderColor: C.line,
     padding: 15,
-    shadowColor: "#5B2838",
+    shadowColor: "#25430D",
     shadowOpacity: 0.04,
     shadowRadius: 10,
     elevation: 1,
@@ -7419,10 +8506,10 @@ const s = StyleSheet.create({
     justifyContent: "center",
     marginBottom: 15,
   },
-  ownerMetricRose: { backgroundColor: "#F7E4E8" },
-  ownerMetricGold: { backgroundColor: "#FFF0D9" },
-  ownerMetricPurple: { backgroundColor: "#EFE8FA" },
-  ownerMetricGreen: { backgroundColor: "#E5F2EC" },
+  ownerMetricRose: { backgroundColor: "#E6F8C5" },
+  ownerMetricGold: { backgroundColor: "#E6F8C5" },
+  ownerMetricPurple: { backgroundColor: "#E6F8C5" },
+  ownerMetricGreen: { backgroundColor: "#E6F8C5" },
   ownerMetricValue: {
     fontSize: 25,
     lineHeight: 29,
@@ -7445,8 +8532,8 @@ const s = StyleSheet.create({
   ownerManagementCard: {
     flexGrow: 1,
     minWidth: 240,
-    minHeight: 88,
-    borderRadius: 20,
+    minHeight: 96,
+    borderRadius: 22,
     backgroundColor: C.white,
     borderWidth: 1,
     borderColor: C.line,
@@ -7454,6 +8541,11 @@ const s = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 12,
+    shadowColor: C.roseDark,
+    shadowOpacity: 0.035,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 1,
   },
   ownerManagementIcon: {
     width: 45,
@@ -7474,9 +8566,9 @@ const s = StyleSheet.create({
   ownerHealthPanel: {
     minHeight: 90,
     borderRadius: 21,
-    backgroundColor: "#E8F3ED",
+    backgroundColor: "#E6F8C5",
     borderWidth: 1,
-    borderColor: "#CFE6DA",
+    borderColor: "#DCEBC8",
     padding: 15,
     flexDirection: "row",
     alignItems: "center",
@@ -7490,11 +8582,11 @@ const s = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  ownerHealthTitle: { fontSize: 13, fontWeight: "900", color: "#315F4B" },
+  ownerHealthTitle: { fontSize: 13, fontWeight: "900", color: "#397A24" },
   ownerHealthText: {
     fontSize: 10.5,
     lineHeight: 15,
-    color: "#5A7B6C",
+    color: "#397A24",
     marginTop: 3,
   },
   ownerPageActions: {
@@ -7518,8 +8610,8 @@ const s = StyleSheet.create({
   ownerEditableCard: {
     flexGrow: 1,
     flexBasis: Platform.OS === "web" ? 330 : "100%",
-    minHeight: 145,
-    borderRadius: 20,
+    minHeight: 154,
+    borderRadius: 22,
     backgroundColor: C.white,
     borderWidth: 1,
     borderColor: C.line,
@@ -7527,6 +8619,11 @@ const s = StyleSheet.create({
     flexDirection: "row",
     alignItems: "flex-start",
     gap: 12,
+    shadowColor: C.roseDark,
+    shadowOpacity: 0.035,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 1,
   },
   ownerInlineActions: { flexDirection: "row", gap: 8, marginTop: 12 },
   ownerEditAction: {
@@ -7543,14 +8640,14 @@ const s = StyleSheet.create({
     minWidth: 82,
     minHeight: 35,
     borderRadius: 11,
-    backgroundColor: "#FCE9EC",
+    backgroundColor: "#E6F8C5",
     paddingHorizontal: 10,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     gap: 5,
   },
-  ownerRemoveActionText: { fontSize: 11, fontWeight: "800", color: "#A33A4E" },
+  ownerRemoveActionText: { fontSize: 11, fontWeight: "800", color: "#25430D" },
   ownerPortfolioGrid: { flexDirection: "row", flexWrap: "wrap", gap: 12 },
   ownerPortfolioCard: {
     width: Platform.OS === "web" ? 210 : "47%",
@@ -7575,7 +8672,7 @@ const s = StyleSheet.create({
     marginTop: 14,
     padding: 13,
     borderRadius: 15,
-    backgroundColor: "#FFF4F6",
+    backgroundColor: "#FFFFFF",
     borderLeftWidth: 3,
     borderLeftColor: C.rose,
   },
@@ -7640,7 +8737,7 @@ const s = StyleSheet.create({
     width: 44,
     height: 5,
     borderRadius: 3,
-    backgroundColor: "#D4C5C9",
+    backgroundColor: "#DCEBC8",
     alignSelf: "center",
     marginBottom: 18,
   },
@@ -7665,7 +8762,7 @@ const s = StyleSheet.create({
   staffModalCardSelected: {
     borderWidth: 2,
     borderColor: C.rose,
-    backgroundColor: "#FFF7F9",
+    backgroundColor: "#FFFFFF",
   },
   staffModalAvatar: {
     width: 58,
@@ -7761,10 +8858,10 @@ const s = StyleSheet.create({
   ownerSalonPhotoPicker: {
     minHeight: 112,
     borderRadius: 20,
-    backgroundColor: "#FFF8FA",
+    backgroundColor: "#FFFFFF",
     borderWidth: 1,
     borderStyle: "dashed",
-    borderColor: "#D9B4BE",
+    borderColor: "#DCEBC8",
     padding: 15,
     flexDirection: "row",
     alignItems: "center",
@@ -7807,10 +8904,10 @@ const s = StyleSheet.create({
   ownerEditorPhotoPicker: {
     minHeight: 84,
     borderRadius: 17,
-    backgroundColor: "#FFF8FA",
+    backgroundColor: "#FFFFFF",
     borderWidth: 1,
     borderStyle: "dashed",
-    borderColor: "#D9B4BE",
+    borderColor: "#DCEBC8",
     padding: 14,
     flexDirection: "row",
     alignItems: "center",
@@ -7871,6 +8968,83 @@ const s = StyleSheet.create({
   ownerEditorSave: { backgroundColor: C.rose, minWidth: 150 },
   ownerEditorCancelText: { fontSize: 13, fontWeight: "800", color: C.muted },
   ownerEditorSaveText: { fontSize: 13, fontWeight: "900", color: C.white },
+  promptBackdrop: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 22,
+    backgroundColor: "rgba(24,35,18,.48)",
+  },
+  promptSheet: {
+    width: "100%",
+    maxWidth: 410,
+    padding: 25,
+    borderRadius: 28,
+    backgroundColor: C.white,
+    borderWidth: 1,
+    borderColor: C.line,
+    shadowColor: C.roseDark,
+    shadowOpacity: 0.18,
+    shadowRadius: 26,
+    shadowOffset: { width: 0, height: 12 },
+    elevation: 15,
+  },
+  promptIcon: {
+    width: 54,
+    height: 54,
+    borderRadius: 19,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: C.blush,
+    marginBottom: 17,
+  },
+  promptEyebrow: {
+    fontSize: 10,
+    fontWeight: "900",
+    letterSpacing: 1.4,
+    color: C.rose,
+    marginBottom: 6,
+  },
+  promptTitle: {
+    fontSize: 23,
+    lineHeight: 29,
+    fontWeight: "900",
+    letterSpacing: -0.45,
+    color: C.ink,
+  },
+  promptTitleCentered: { textAlign: "center" },
+  promptMessage: {
+    fontSize: 13,
+    lineHeight: 20,
+    color: C.muted,
+    marginTop: 8,
+    marginBottom: 23,
+  },
+  promptActions: { flexDirection: "row", gap: 10 },
+  promptCancel: {
+    flex: 1,
+    minHeight: 50,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: C.line,
+    backgroundColor: C.pale,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 10,
+  },
+  promptCancelText: { color: C.roseDark, fontSize: 12, fontWeight: "800" },
+  promptConfirm: {
+    flex: 1.15,
+    minHeight: 50,
+    borderRadius: 16,
+    backgroundColor: C.rose,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    paddingHorizontal: 10,
+  },
+  promptConfirmText: { color: C.white, fontSize: 12, fontWeight: "900" },
   profileAvatarImage: {
     width: 74,
     height: 74,
@@ -7896,7 +9070,7 @@ const s = StyleSheet.create({
     shadowRadius: 14,
     elevation: 12,
   },
-  favoriteToastError: { backgroundColor: "#8F3045" },
+  favoriteToastError: { backgroundColor: "#25430D" },
   favoriteToastIcon: {
     width: 36,
     height: 36,
@@ -7915,7 +9089,7 @@ const s = StyleSheet.create({
   reviewCardEditing: {
     borderWidth: 2,
     borderColor: C.rose,
-    backgroundColor: "#FFF9FA",
+    backgroundColor: "#FFFFFF",
   },
   reviewActions: { alignItems: "flex-end", gap: 7 },
   reviewEditButton: {

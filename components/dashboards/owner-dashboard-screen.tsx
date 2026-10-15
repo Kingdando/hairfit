@@ -1,10 +1,11 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Image, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Image, Modal, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import Svg, { Circle, G, Line, Path, Text as SvgText } from 'react-native-svg';
 
 import { getApiAssetUrl, type AuthUser, type OwnerDashboard } from '@/services/api';
 
-const faceFitLogo = require('../../assets/images/facefit-logo.png');
+const faceFitLogo = require('../../assets/images/facefit-logo-green.png');
 
 type OwnerDestination = 'owner-bookings' | 'owner-services' | 'owner-staff' | 'owner-profile' | 'owner-reviews';
 
@@ -26,8 +27,15 @@ type AnalyticsMetric = 'revenue' | 'bookings';
 type HairstyleSeries = { name: string; color: string; values: number[] };
 type StaffPerformanceItem = { name: string; bookings: number; revenue: number; rating: number };
 
-const colors = { rose: '#A94F67', roseDark: '#743548', blush: '#F7E4E8', ink: '#292326', muted: '#7C7074', line: '#EDE3E5', white: '#FFFFFF', green: '#4F826B', gold: '#C48B3A' };
-const HAIRSTYLE_LINE_COLORS = [colors.rose, colors.green, colors.gold, '#6C63A6'];
+const colors = { rose: '#397A24', roseDark: '#25430D', blush: '#E6F8C5', ink: '#24251F', muted: '#25430D', line: '#DCEBC8', white: '#FFFFFF', green: '#397A24', gold: '#8BCF35' };
+const HAIRSTYLE_LINE_COLORS = [colors.rose, colors.green, colors.gold, '#397A24'];
+
+// SVG text doesn't inherit the app font on web, so set one explicitly.
+// On native, undefined falls back to the system font.
+const CHART_FONT = Platform.select({
+  web: 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
+  default: undefined,
+});
 
 const navigation: { label: string; icon: keyof typeof Ionicons.glyphMap; destination: OwnerDestination }[] = [
   { label: 'Manage booking requests', icon: 'calendar', destination: 'owner-bookings' },
@@ -118,15 +126,22 @@ function generateRevenueBookingPoints(windowStart: Date): AnalyticsPoint[] {
   return points;
 }
 
+// MOCK DATA — each hairstyle gets a base level plus a gentle trend and small daily noise so the
+// lines read like real trends instead of random scribbles. Replace with real per-style daily
+// booking counts from the backend (same { labels, series } shape).
 function generateHairstyleSeries(windowStart: Date): { labels: string[]; series: HairstyleSeries[] } {
+  const seedBase = isoDay(windowStart);
   const labels = Array.from({ length: WINDOW_DAYS }, (_, i) => {
     const day = addDays(windowStart, i);
     return `${WEEKDAY_ABBR[day.getDay()]} ${day.getDate()}`;
   });
   const withTotals = MOCK_HAIRSTYLE_CATALOG.map(name => {
+    const base = 5 + seededRandom(`${seedBase}-${name}-base`) * 7;
+    const slope = (seededRandom(`${seedBase}-${name}-slope`) - 0.5) * 1.6;
     const values = Array.from({ length: WINDOW_DAYS }, (_, i) => {
       const day = addDays(windowStart, i);
-      return Math.round(2 + seededRandom(`${isoDay(day)}-style-${name}`) * 14);
+      const noise = (seededRandom(`${isoDay(day)}-style-${name}`) - 0.5) * 4;
+      return Math.max(1, Math.round(base + slope * i + noise));
     });
     return { name, values, total: values.reduce((sum, v) => sum + v, 0) };
   });
@@ -168,43 +183,81 @@ function RevenueBookingsChart({ metric, data }: { metric: AnalyticsMetric; data:
   );
 }
 
-function LineChart({ labels, series, height = 150 }: { labels: string[]; series: HairstyleSeries[]; height?: number }) {
+// Turns points into a smooth curve (Catmull-Rom converted to cubic Béziers).
+// Control points are clamped so the curve never dips below the baseline or above the top.
+function buildSmoothPath(points: { x: number; y: number }[], minY: number, maxY: number) {
+  if (points.length < 2) return '';
+  const clampY = (y: number) => Math.min(Math.max(y, minY), maxY);
+  let d = `M ${points[0].x.toFixed(1)} ${points[0].y.toFixed(1)}`;
+  for (let i = 0; i < points.length - 1; i++) {
+    const p0 = points[i - 1] ?? points[i];
+    const p1 = points[i];
+    const p2 = points[i + 1];
+    const p3 = points[i + 2] ?? p2;
+    const cp1x = p1.x + (p2.x - p0.x) / 6;
+    const cp1y = clampY(p1.y + (p2.y - p0.y) / 6);
+    const cp2x = p2.x - (p3.x - p1.x) / 6;
+    const cp2y = clampY(p2.y - (p3.y - p1.y) / 6);
+    d += ` C ${cp1x.toFixed(1)} ${cp1y.toFixed(1)}, ${cp2x.toFixed(1)} ${cp2y.toFixed(1)}, ${p2.x.toFixed(1)} ${p2.y.toFixed(1)}`;
+  }
+  return d;
+}
+
+function LineChart({ labels, series, height = 200 }: { labels: string[]; series: HairstyleSeries[]; height?: number }) {
   const [width, setWidth] = useState(0);
-  const max = Math.max(...series.flatMap(s => s.values), 1);
-  const stepX = labels.length > 1 && width > 0 ? width / (labels.length - 1) : 0;
+
+  const padding = { top: 12, right: 26, bottom: 26, left: 30 };
+  const plotWidth = Math.max(width - padding.left - padding.right, 0);
+  const plotHeight = height - padding.top - padding.bottom;
+
+  const rawMax = Math.max(...series.flatMap(s => s.values), 1);
+  const niceMax = Math.max(4, Math.ceil(rawMax / 4) * 4);
+  const ticks = [0, 1, 2, 3, 4].map(step => Math.round((niceMax * step) / 4));
+
+  const xAt = (index: number) => padding.left + (labels.length > 1 ? (plotWidth * index) / (labels.length - 1) : plotWidth / 2);
+  const yAt = (value: number) => padding.top + plotHeight - (value / niceMax) * plotHeight;
 
   return (
     <View>
       <View style={{ height }} onLayout={e => setWidth(e.nativeEvent.layout.width)}>
-        {width > 0 && series.map(item => (
-          <View key={item.name} style={StyleSheet.absoluteFillObject}>
-            {item.values.map((value, i) => {
-              if (i === 0) return null;
-              const x1 = stepX * (i - 1);
-              const y1 = height - (item.values[i - 1] / max) * (height - 14);
-              const x2 = stepX * i;
-              const y2 = height - (value / max) * (height - 14);
-              const dx = x2 - x1;
-              const dy = y2 - y1;
-              const length = Math.sqrt(dx * dx + dy * dy);
-              const angle = Math.atan2(dy, dx);
+        {width > 0 && (
+          <Svg width={width} height={height}>
+            {ticks.map(tick => {
+              const y = yAt(tick);
               return (
-                <View
-                  key={`seg-${i}`}
-                  style={{ position: 'absolute', left: (x1 + x2) / 2 - length / 2, top: (y1 + y2) / 2 - 1, width: length, height: 2, backgroundColor: item.color, transform: [{ rotate: `${angle}rad` }] }}
+                <G key={`tick-${tick}`}>
+                  <Line x1={padding.left} x2={width - padding.right} y1={y} y2={y} stroke={colors.line} strokeWidth={1} strokeDasharray={tick === 0 ? undefined : '4 4'} />
+                  <SvgText x={padding.left - 8} y={y + 3} fontSize={10} fontWeight="700" fontFamily={CHART_FONT} fill={colors.muted} textAnchor="end">{tick}</SvgText>
+                </G>
+              );
+            })}
+
+            {labels.map((label, i) => (
+              <SvgText key={`x-${label}`} x={xAt(i)} y={height - 8} fontSize={10} fontWeight="700" fontFamily={CHART_FONT} fill={colors.muted} textAnchor="middle">{label}</SvgText>
+            ))}
+
+            {series.map(item => {
+              const pts = item.values.map((value, i) => ({ x: xAt(i), y: yAt(value) }));
+              return (
+                <Path
+                  key={`line-${item.name}`}
+                  d={buildSmoothPath(pts, padding.top, padding.top + plotHeight)}
+                  stroke={item.color}
+                  strokeWidth={2.5}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  fill="none"
                 />
               );
             })}
-            {item.values.map((value, i) => {
-              const x = stepX * i;
-              const y = height - (value / max) * (height - 14);
-              return <View key={`dot-${i}`} style={{ position: 'absolute', left: x - 4, top: y - 4, width: 8, height: 8, borderRadius: 4, backgroundColor: item.color, borderWidth: 2, borderColor: colors.white }} />;
-            })}
-          </View>
-        ))}
-      </View>
-      <View style={styles.lineChartLabels}>
-        {labels.map(label => <Text key={label} style={styles.chartBarLabel}>{label}</Text>)}
+
+            {series.map(item =>
+              item.values.map((value, i) => (
+                <Circle key={`dot-${item.name}-${i}`} cx={xAt(i)} cy={yAt(value)} r={3.5} fill={item.color} stroke={colors.white} strokeWidth={2} />
+              ))
+            )}
+          </Svg>
+        )}
       </View>
       <View style={styles.legendRow}>
         {series.map(item => (
@@ -219,7 +272,7 @@ function LineChart({ labels, series, height = 150 }: { labels: string[]; series:
 }
 
 function StaffPerformanceCard({ items }: { items: StaffPerformanceItem[] }) {
-  const medalColors = [colors.gold, '#9AA3AE', '#B87333'];
+  const medalColors = [colors.gold, '#397A24', '#25430D'];
   return (
     <View style={styles.analyticsCard}>
       <View style={styles.staffList}>
@@ -359,7 +412,7 @@ export function OwnerDashboardScreen({ dashboard, user, loading, error, unreadNo
           <Ionicons name="log-out-outline" size={17} color={colors.white} />
           <Text style={styles.logoutText}>Log out</Text>
         </Pressable>
-        <View style={styles.status}><Ionicons name="checkmark-circle" size={16} color="#BDE8D3" /><Text style={styles.statusText}>Salon active</Text></View>
+        <View style={styles.status}><Ionicons name="checkmark-circle" size={16} color="#8BCF35" /><Text style={styles.statusText}>Salon active</Text></View>
       </View>
       <View style={styles.identity}>
         {dashboard?.profileImageUrl
@@ -368,7 +421,7 @@ export function OwnerDashboardScreen({ dashboard, user, loading, error, unreadNo
         <View style={styles.heroCopy}>
           <Text style={styles.greeting}>Welcome back,</Text>
           <Text style={styles.heroTitle}>{dashboard?.name || user?.fullName || 'Your salon'}</Text>
-          <View style={styles.meta}><Ionicons name="location-outline" size={15} color="#F3CCD6" /><Text numberOfLines={1} style={styles.metaText}>{dashboard?.address || 'Manage your salon from one place'}</Text></View>
+          <View style={styles.meta}><Ionicons name="location-outline" size={15} color="#E6F8C5" /><Text numberOfLines={1} style={styles.metaText}>{dashboard?.address || 'Manage your salon from one place'}</Text></View>
         </View>
       </View>
     </View>
@@ -406,8 +459,8 @@ export function OwnerDashboardScreen({ dashboard, user, loading, error, unreadNo
               </Pressable>
             </View>
             <View style={[styles.trendPill, trendUp ? styles.trendPillUp : styles.trendPillDown]}>
-              <Ionicons name={trendUp ? 'trending-up' : 'trending-down'} size={13} color={trendUp ? colors.green : '#C52E59'} />
-              <Text style={[styles.trendText, { color: trendUp ? colors.green : '#C52E59' }]}>{trendUp ? '+' : ''}{trendPct}% vs previous week</Text>
+              <Ionicons name={trendUp ? 'trending-up' : 'trending-down'} size={13} color={trendUp ? colors.green : '#397A24'} />
+              <Text style={[styles.trendText, { color: trendUp ? colors.green : '#397A24' }]}>{trendUp ? '+' : ''}{trendPct}% vs previous week</Text>
             </View>
           </View>
 
@@ -439,7 +492,7 @@ export function OwnerDashboardScreen({ dashboard, user, loading, error, unreadNo
 
         <SectionHeading eyebrow="QUICK ACCESS" title="Manage your salon" />
         <View style={styles.managementGrid}>{navigation.map((item, index) => <Pressable accessibilityRole="button" key={item.label} onPress={() => onNavigate(item.destination)} style={({ pressed }) => [styles.managementCard, { flexBasis: desktop ? '30%' : '100%' }, pressed && styles.pressed]}><View style={[styles.managementIcon, index % 3 === 1 && styles.metricGold, index % 3 === 2 && styles.metricGreen]}><Ionicons name={item.icon} size={22} color={colors.roseDark} /></View><View style={styles.grow}><Text style={styles.managementTitle}>{item.label}</Text><Text style={styles.managementDescription}>{index === 0 ? `${dashboard?.pendingBookings ?? 0} requests waiting` : index === 1 ? `${dashboard?.serviceCount ?? 0} published services` : index === 2 ? `${dashboard?.availableStaff ?? 0} team members available` : index === 3 ? 'Update salon information' : `${dashboard?.reviewCount ?? 0} customer reviews`}</Text></View><Ionicons name="arrow-forward" size={18} color={colors.rose} /></Pressable>)}</View>
-        <View style={styles.health}><View style={styles.healthIcon}><Ionicons name="shield-checkmark" size={24} color={colors.white} /></View><View style={styles.grow}><Text style={styles.healthTitle}>Your salon is ready for bookings</Text><Text style={styles.healthText}>{dashboard?.serviceCount ?? 0} services are visible to FaceFit customers.</Text></View><Ionicons name="sparkles-outline" size={24} color="#8EBFA9" /></View>
+        <View style={styles.health}><View style={styles.healthIcon}><Ionicons name="shield-checkmark" size={24} color={colors.white} /></View><View style={styles.grow}><Text style={styles.healthTitle}>Your salon is ready for bookings</Text><Text style={styles.healthText}>{dashboard?.serviceCount ?? 0} services are visible to FaceFit customers.</Text></View><Ionicons name="sparkles-outline" size={24} color="#8BCF35" /></View>
       </>}
 
     <DatePickerModal visible={pickerOpen} selectedDate={anchorDate} maxDate={today} onSelect={handlePickDate} onClose={() => setPickerOpen(false)} />
@@ -451,15 +504,15 @@ function SectionHeading({ eyebrow, title }: { eyebrow: string; title: string }) 
 }
 
 const styles = StyleSheet.create({
-  header:{minHeight:78,flexDirection:'row',alignItems:'center',justifyContent:'space-between',marginBottom:12},logo:{width:54,height:54,borderRadius:16,backgroundColor:colors.white,alignItems:'center',justifyContent:'center',overflow:'hidden'},logoImage:{width:'100%',height:'100%',resizeMode:'contain'},headerTitle:{fontSize:20,fontWeight:'900',color:colors.ink},headerAction:{width:46,height:46,borderRadius:23,backgroundColor:colors.white,borderWidth:1,borderColor:colors.line,alignItems:'center',justifyContent:'center'},badge:{position:'absolute',right:-3,top:-5,minWidth:21,height:21,borderRadius:11,backgroundColor:'#C52E59',alignItems:'center',justifyContent:'center',paddingHorizontal:4},badgeText:{fontSize:10,fontWeight:'900',color:colors.white},
-  hero:{minHeight:220,borderRadius:28,backgroundColor:colors.roseDark,padding:23,overflow:'hidden',marginBottom:25},heroGlow:{position:'absolute',width:230,height:230,borderRadius:115,right:-72,top:-90,backgroundColor:'rgba(255,255,255,.07)'},heroTop:{flexDirection:'row',alignItems:'center',justifyContent:'space-between',marginBottom:22},logout:{minHeight:38,borderRadius:12,backgroundColor:'rgba(255,255,255,.16)',borderWidth:1,borderColor:'rgba(255,255,255,.24)',paddingHorizontal:13,flexDirection:'row',alignItems:'center',justifyContent:'center',gap:7},logoutText:{fontSize:12,fontWeight:'900',color:colors.white},status:{flexDirection:'row',alignItems:'center',gap:5},statusText:{fontSize:10,fontWeight:'800',color:'#D8F3E6'},identity:{flexDirection:'row',alignItems:'center',gap:17},photo:{width:86,height:86,borderRadius:25,resizeMode:'cover',backgroundColor:colors.blush,borderWidth:2,borderColor:'rgba(255,255,255,.45)'},photoFallback:{width:86,height:86,borderRadius:25,alignItems:'center',justifyContent:'center',backgroundColor:'rgba(255,255,255,.14)',borderWidth:2,borderColor:'rgba(255,255,255,.28)'},heroCopy:{flex:1,minWidth:0},greeting:{fontSize:13,fontWeight:'600',color:'#F3CCD6',marginBottom:4},heroTitle:{fontSize:29,lineHeight:35,fontWeight:'900',color:colors.white,letterSpacing:-.6},meta:{flexDirection:'row',alignItems:'center',gap:6,marginTop:12,maxWidth:500},metaText:{flexShrink:1,fontSize:12,color:'#F3CCD6'},
-  state:{minHeight:145,borderRadius:20,backgroundColor:colors.white,borderWidth:1,borderColor:colors.line,alignItems:'center',justifyContent:'center',gap:8,padding:18,marginBottom:18},small:{fontSize:11,lineHeight:17,color:colors.muted},cardTitle:{fontSize:15,fontWeight:'700',color:colors.ink},sectionHeading:{flexDirection:'row',alignItems:'flex-end',justifyContent:'space-between',marginTop:5,marginBottom:13},eyebrow:{fontSize:9,fontWeight:'900',letterSpacing:1.2,color:colors.rose,marginBottom:4},sectionTitle:{fontSize:19,fontWeight:'900',color:colors.ink},metricsGrid:{flexDirection:'row',flexWrap:'wrap',gap:11,marginBottom:27},metricCard:{flexGrow:1,minWidth:135,minHeight:158,borderRadius:21,backgroundColor:colors.white,borderWidth:1,borderColor:colors.line,padding:15},metricIcon:{width:40,height:40,borderRadius:13,alignItems:'center',justifyContent:'center',marginBottom:15},metricRose:{backgroundColor:'#F7E4E8'},metricGold:{backgroundColor:'#FFF0D9'},metricPurple:{backgroundColor:'#EFE8FA'},metricGreen:{backgroundColor:'#E5F2EC'},metricValue:{fontSize:25,lineHeight:29,fontWeight:'900',color:colors.ink},metricLabel:{fontSize:12,fontWeight:'800',color:colors.roseDark,marginTop:2},metricCaption:{fontSize:10,color:colors.muted,marginTop:3},managementGrid:{flexDirection:'row',flexWrap:'wrap',gap:11,marginBottom:24},managementCard:{flexGrow:1,minWidth:240,minHeight:88,borderRadius:20,backgroundColor:colors.white,borderWidth:1,borderColor:colors.line,padding:13,flexDirection:'row',alignItems:'center',gap:12},managementIcon:{width:45,height:45,borderRadius:15,backgroundColor:colors.blush,alignItems:'center',justifyContent:'center'},grow:{flex:1,minWidth:0},managementTitle:{fontSize:13,fontWeight:'800',color:colors.ink},managementDescription:{fontSize:10.5,lineHeight:15,color:colors.muted,marginTop:3},health:{minHeight:90,borderRadius:21,backgroundColor:'#E8F3ED',borderWidth:1,borderColor:'#CFE6DA',padding:15,flexDirection:'row',alignItems:'center',gap:12},healthIcon:{width:46,height:46,borderRadius:15,backgroundColor:colors.green,alignItems:'center',justifyContent:'center'},healthTitle:{fontSize:13,fontWeight:'900',color:'#315F4B'},healthText:{fontSize:10.5,lineHeight:15,color:'#5A7B6C',marginTop:3},pressed:{opacity:.72},
+  header:{minHeight:82,flexDirection:'row',alignItems:'center',justifyContent:'space-between',marginBottom:18},logo:{width:56,height:56,borderRadius:18,backgroundColor:colors.white,alignItems:'center',justifyContent:'center',overflow:'hidden'},logoImage:{width:'100%',height:'100%',resizeMode:'contain'},headerTitle:{fontSize:21,fontWeight:'900',letterSpacing:-.3,color:colors.ink},headerAction:{width:48,height:48,borderRadius:17,backgroundColor:colors.white,borderWidth:1,borderColor:colors.line,alignItems:'center',justifyContent:'center'},badge:{position:'absolute',right:-3,top:-5,minWidth:21,height:21,borderRadius:11,backgroundColor:'#397A24',alignItems:'center',justifyContent:'center',paddingHorizontal:4},badgeText:{fontSize:10,fontWeight:'900',color:colors.white},
+  hero:{minHeight:220,borderRadius:28,backgroundColor:colors.roseDark,padding:23,overflow:'hidden',marginBottom:25},heroGlow:{position:'absolute',width:230,height:230,borderRadius:115,right:-72,top:-90,backgroundColor:'rgba(255,255,255,.07)'},heroTop:{flexDirection:'row',alignItems:'center',justifyContent:'space-between',marginBottom:22},logout:{minHeight:38,borderRadius:12,backgroundColor:'rgba(255,255,255,.16)',borderWidth:1,borderColor:'rgba(255,255,255,.24)',paddingHorizontal:13,flexDirection:'row',alignItems:'center',justifyContent:'center',gap:7},logoutText:{fontSize:12,fontWeight:'900',color:colors.white},status:{flexDirection:'row',alignItems:'center',gap:5},statusText:{fontSize:10,fontWeight:'800',color:'#8BCF35'},identity:{flexDirection:'row',alignItems:'center',gap:17},photo:{width:86,height:86,borderRadius:25,resizeMode:'cover',backgroundColor:colors.blush,borderWidth:2,borderColor:'rgba(255,255,255,.45)'},photoFallback:{width:86,height:86,borderRadius:25,alignItems:'center',justifyContent:'center',backgroundColor:'rgba(255,255,255,.14)',borderWidth:2,borderColor:'rgba(255,255,255,.28)'},heroCopy:{flex:1,minWidth:0},greeting:{fontSize:13,fontWeight:'600',color:'#E6F8C5',marginBottom:4},heroTitle:{fontSize:29,lineHeight:35,fontWeight:'900',color:colors.white,letterSpacing:-.6},meta:{flexDirection:'row',alignItems:'center',gap:6,marginTop:12,maxWidth:500},metaText:{flexShrink:1,fontSize:12,color:'#E6F8C5'},
+  state:{minHeight:145,borderRadius:20,backgroundColor:colors.white,borderWidth:1,borderColor:colors.line,alignItems:'center',justifyContent:'center',gap:8,padding:18,marginBottom:18},small:{fontSize:11,lineHeight:17,color:colors.muted},cardTitle:{fontSize:15,fontWeight:'700',color:colors.ink},sectionHeading:{flexDirection:'row',alignItems:'flex-end',justifyContent:'space-between',marginTop:5,marginBottom:13},eyebrow:{fontSize:9,fontWeight:'900',letterSpacing:1.2,color:colors.rose,marginBottom:4},sectionTitle:{fontSize:19,fontWeight:'900',color:colors.ink},metricsGrid:{flexDirection:'row',flexWrap:'wrap',gap:11,marginBottom:27},metricCard:{flexGrow:1,minWidth:135,minHeight:158,borderRadius:21,backgroundColor:colors.white,borderWidth:1,borderColor:colors.line,padding:15},metricIcon:{width:40,height:40,borderRadius:13,alignItems:'center',justifyContent:'center',marginBottom:15},metricRose:{backgroundColor:'#E6F8C5'},metricGold:{backgroundColor:'#E6F8C5'},metricPurple:{backgroundColor:'#E6F8C5'},metricGreen:{backgroundColor:'#E6F8C5'},metricValue:{fontSize:25,lineHeight:29,fontWeight:'900',color:colors.ink},metricLabel:{fontSize:12,fontWeight:'800',color:colors.roseDark,marginTop:2},metricCaption:{fontSize:10,color:colors.muted,marginTop:3},managementGrid:{flexDirection:'row',flexWrap:'wrap',gap:11,marginBottom:24},managementCard:{flexGrow:1,minWidth:240,minHeight:88,borderRadius:20,backgroundColor:colors.white,borderWidth:1,borderColor:colors.line,padding:13,flexDirection:'row',alignItems:'center',gap:12},managementIcon:{width:45,height:45,borderRadius:15,backgroundColor:colors.blush,alignItems:'center',justifyContent:'center'},grow:{flex:1,minWidth:0},managementTitle:{fontSize:13,fontWeight:'800',color:colors.ink},managementDescription:{fontSize:10.5,lineHeight:15,color:colors.muted,marginTop:3},health:{minHeight:90,borderRadius:21,backgroundColor:'#E6F8C5',borderWidth:1,borderColor:'#DCEBC8',padding:15,flexDirection:'row',alignItems:'center',gap:12},healthIcon:{width:46,height:46,borderRadius:15,backgroundColor:colors.green,alignItems:'center',justifyContent:'center'},healthTitle:{fontSize:13,fontWeight:'900',color:'#397A24'},healthText:{fontSize:10.5,lineHeight:15,color:'#397A24',marginTop:3},pressed:{opacity:.72},
   filterBar:{flexDirection:'row',alignItems:'center',justifyContent:'center',gap:8,marginBottom:16},dateNavButton:{width:34,height:34,borderRadius:11,backgroundColor:colors.white,borderWidth:1,borderColor:colors.line,alignItems:'center',justifyContent:'center'},dateLabelButton:{flexDirection:'row',alignItems:'center',gap:7,minHeight:34,borderRadius:11,backgroundColor:colors.white,borderWidth:1,borderColor:colors.line,paddingHorizontal:13},dateNavLabel:{fontSize:12,fontWeight:'800',color:colors.ink},
   cardCaption:{fontSize:12.5,fontWeight:'800',color:colors.ink,marginBottom:9,marginTop:2},
-  analyticsCard:{minHeight:120,borderRadius:21,backgroundColor:colors.white,borderWidth:1,borderColor:colors.line,padding:18,marginBottom:22},analyticsTopRow:{flexDirection:'row',alignItems:'center',justifyContent:'space-between',marginBottom:16,flexWrap:'wrap',gap:10},toggleGroup:{flexDirection:'row',backgroundColor:colors.blush,borderRadius:12,padding:3,gap:2},toggleButton:{minHeight:32,borderRadius:9,paddingHorizontal:14,alignItems:'center',justifyContent:'center'},toggleButtonActive:{backgroundColor:colors.roseDark},toggleText:{fontSize:11.5,fontWeight:'800',color:colors.roseDark},toggleTextActive:{color:colors.white},trendPill:{flexDirection:'row',alignItems:'center',gap:5,minHeight:28,borderRadius:9,paddingHorizontal:10},trendPillUp:{backgroundColor:'#E5F2EC'},trendPillDown:{backgroundColor:'#FBE7EC'},trendText:{fontSize:11,fontWeight:'800'},
+  analyticsCard:{minHeight:120,borderRadius:21,backgroundColor:colors.white,borderWidth:1,borderColor:colors.line,padding:18,marginBottom:22},analyticsTopRow:{flexDirection:'row',alignItems:'center',justifyContent:'space-between',marginBottom:16,flexWrap:'wrap',gap:10},toggleGroup:{flexDirection:'row',backgroundColor:colors.blush,borderRadius:12,padding:3,gap:2},toggleButton:{minHeight:32,borderRadius:9,paddingHorizontal:14,alignItems:'center',justifyContent:'center'},toggleButtonActive:{backgroundColor:colors.roseDark},toggleText:{fontSize:11.5,fontWeight:'800',color:colors.roseDark},toggleTextActive:{color:colors.white},trendPill:{flexDirection:'row',alignItems:'center',gap:5,minHeight:28,borderRadius:9,paddingHorizontal:10},trendPillUp:{backgroundColor:'#E6F8C5'},trendPillDown:{backgroundColor:'#E6F8C5'},trendText:{fontSize:11,fontWeight:'800'},
   chartBars:{flexDirection:'row',alignItems:'flex-end',justifyContent:'space-between',height:150,marginBottom:16},chartBarColumn:{flex:1,alignItems:'center',gap:6},chartBarValue:{fontSize:9,fontWeight:'800',color:colors.muted},chartBarTrack:{width:'62%',height:96,justifyContent:'flex-end'},chartBar:{width:'100%',borderRadius:8,backgroundColor:colors.rose,minHeight:6},chartBarAlt:{backgroundColor:colors.green},chartBarLabel:{flex:1,textAlign:'center',fontSize:10,fontWeight:'700',color:colors.muted},
   chartFooter:{flexDirection:'row',justifyContent:'space-between',borderTopWidth:1,borderTopColor:colors.line,paddingTop:14},chartFooterStat:{alignItems:'flex-start'},chartFooterValue:{fontSize:15,fontWeight:'900',color:colors.ink},chartFooterLabel:{fontSize:10,color:colors.muted,marginTop:2},
-  lineChartLabels:{flexDirection:'row',justifyContent:'space-between',marginTop:8},legendRow:{flexDirection:'row',flexWrap:'wrap',gap:14,marginTop:16,paddingTop:14,borderTopWidth:1,borderTopColor:colors.line},legendItem:{flexDirection:'row',alignItems:'center',gap:6},legendSwatch:{width:9,height:9,borderRadius:4.5},legendText:{fontSize:11,fontWeight:'700',color:colors.ink},
-  staffList:{gap:13},staffRow:{flexDirection:'row',alignItems:'center',gap:11},staffRank:{width:24,height:24,borderRadius:12,backgroundColor:colors.blush,alignItems:'center',justifyContent:'center'},staffRankText:{fontSize:11,fontWeight:'900',color:colors.roseDark},staffRankTextTop:{color:colors.white},staffAvatar:{width:42,height:42,borderRadius:14,backgroundColor:colors.roseDark,alignItems:'center',justifyContent:'center'},staffAvatarText:{fontSize:13,fontWeight:'900',color:colors.white},staffName:{fontSize:13,fontWeight:'800',color:colors.ink},staffMeta:{fontSize:10.5,color:colors.muted,marginTop:2},staffRatingPill:{flexDirection:'row',alignItems:'center',gap:4,backgroundColor:'#FFF0D9',borderRadius:9,paddingHorizontal:9,minHeight:26},staffRatingText:{fontSize:11,fontWeight:'800',color:colors.ink},
+  legendRow:{flexDirection:'row',flexWrap:'wrap',gap:14,marginTop:12,paddingTop:14,borderTopWidth:1,borderTopColor:colors.line},legendItem:{flexDirection:'row',alignItems:'center',gap:6},legendSwatch:{width:9,height:9,borderRadius:4.5},legendText:{fontSize:11,fontWeight:'700',color:colors.ink},
+  staffList:{gap:13},staffRow:{flexDirection:'row',alignItems:'center',gap:11},staffRank:{width:24,height:24,borderRadius:12,backgroundColor:colors.blush,alignItems:'center',justifyContent:'center'},staffRankText:{fontSize:11,fontWeight:'900',color:colors.roseDark},staffRankTextTop:{color:colors.white},staffAvatar:{width:42,height:42,borderRadius:14,backgroundColor:colors.roseDark,alignItems:'center',justifyContent:'center'},staffAvatarText:{fontSize:13,fontWeight:'900',color:colors.white},staffName:{fontSize:13,fontWeight:'800',color:colors.ink},staffMeta:{fontSize:10.5,color:colors.muted,marginTop:2},staffRatingPill:{flexDirection:'row',alignItems:'center',gap:4,backgroundColor:'#E6F8C5',borderRadius:9,paddingHorizontal:9,minHeight:26},staffRatingText:{fontSize:11,fontWeight:'800',color:colors.ink},
   pickerBackdrop:{flex:1,backgroundColor:'rgba(28,20,23,.55)',alignItems:'center',justifyContent:'center',padding:24},pickerSheet:{width:'100%',maxWidth:340,borderRadius:22,backgroundColor:colors.white,padding:18},pickerHeader:{flexDirection:'row',alignItems:'center',justifyContent:'space-between',marginBottom:14},pickerNavButton:{width:32,height:32,borderRadius:10,alignItems:'center',justifyContent:'center',backgroundColor:colors.blush},pickerMonthLabel:{fontSize:14,fontWeight:'900',color:colors.ink},pickerWeekRow:{flexDirection:'row',marginBottom:6},pickerWeekLabel:{flex:1,textAlign:'center',fontSize:10,fontWeight:'800',color:colors.muted},pickerGrid:{flexDirection:'row',flexWrap:'wrap'},pickerCell:{width:`${100/7}%`,aspectRatio:1,alignItems:'center',justifyContent:'center',borderRadius:10},pickerCellSelected:{backgroundColor:colors.roseDark},pickerCellText:{fontSize:12.5,fontWeight:'700',color:colors.ink},pickerCellTextDisabled:{color:colors.line},pickerCellTextSelected:{color:colors.white,fontWeight:'900'},
 });

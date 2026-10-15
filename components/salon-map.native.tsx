@@ -20,10 +20,10 @@ export function SalonMap({ salons, onSelectSalon }: SalonMapProps) {
 }
 
 const styles = StyleSheet.create({
-  container: { height: 470, borderRadius: 22, overflow: 'hidden', backgroundColor: '#EDE3E5' },
-  marker: { width: 42, height: 42, borderRadius: 21, backgroundColor: '#A94F67', borderWidth: 3, borderColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center', elevation: 6 },
+  container: { height: 470, borderRadius: 22, overflow: 'hidden', backgroundColor: '#DCEBC8' },
+  marker: { width: 42, height: 42, borderRadius: 21, backgroundColor: '#397A24', borderWidth: 3, borderColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center', elevation: 6 },
   markerLogo: { width: 36, height: 36, borderRadius: 18, resizeMode: 'cover' },
   legend: { position: 'absolute', left: 14, bottom: 14, flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, paddingVertical: 9, borderRadius: 13, backgroundColor: '#FFFFFF' },
-  legendMarker: { width: 25, height: 25, borderRadius: 13, backgroundColor: '#A94F67', alignItems: 'center', justifyContent: 'center' },
-  legendText: { color: '#292326', fontSize: 12, fontWeight: '700' },
+  legendMarker: { width: 25, height: 25, borderRadius: 13, backgroundColor: '#397A24', alignItems: 'center', justifyContent: 'center' },
+  legendText: { color: '#24251F', fontSize: 12, fontWeight: '700' },
 });

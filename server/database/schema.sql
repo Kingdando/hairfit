@@ -23,9 +23,12 @@ CREATE TABLE IF NOT EXISTS customer_profiles (
   hair_type VARCHAR(50),
   hair_length VARCHAR(50),
   hair_texture VARCHAR(50),
+  style_preference ENUM('men', 'women') NOT NULL DEFAULT 'men',
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   CONSTRAINT fk_customer_profiles_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
+
+ALTER TABLE customer_profiles ADD COLUMN IF NOT EXISTS style_preference ENUM('men', 'women') NOT NULL DEFAULT 'men' AFTER hair_texture;
 
 CREATE TABLE IF NOT EXISTS salons (
   id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -312,8 +315,8 @@ WHERE NOT EXISTS (
     AND sv.is_active = TRUE AND sv.deleted_at IS NULL
 );
 
--- Starter hairstyle availability. Each style is assigned to a focused subset
--- of salons so customers only see locations that offer their selected look.
+-- Starter hairstyle availability. Teves Salon & Spa receives every FaceFit
+-- recommendation; the remaining salons receive a focused subset.
 INSERT IGNORE INTO salon_hairstyles (salon_id, hairstyle_name)
 SELECT s.id, styles.name
 FROM salons s
@@ -341,7 +344,58 @@ CROSS JOIN (
   UNION ALL SELECT 20, 'Messy Medium Crop'
   UNION ALL SELECT 21, 'Bro Flow'
 ) AS styles
-WHERE MOD(s.id + styles.style_index, 3) = 0;
+WHERE s.is_active = TRUE
+  AND (s.external_id = 'teves-salon-spa' OR MOD(s.id + styles.style_index, 3) = 0);
+
+-- Include the remaining recommended styles so women's suggestions and the
+-- fifth-ranked styles can also find salon matches after a database update.
+INSERT IGNORE INTO salon_hairstyles (salon_id, hairstyle_name)
+SELECT s.id, styles.name
+FROM salons s
+CROSS JOIN (
+  SELECT 22 AS style_index, 'Tapered Brush Up' AS name
+  UNION ALL SELECT 23, 'Slick Side Sweep'
+  UNION ALL SELECT 24, 'Soft Taper with Texture'
+  UNION ALL SELECT 25, 'Classic Taper with Side Fringe'
+  UNION ALL SELECT 26, 'Wavy Side Part'
+  UNION ALL SELECT 27, 'Low Taper with Side Sweep'
+  UNION ALL SELECT 28, 'Soft Layered Lob'
+  UNION ALL SELECT 29, 'Textured Pixie'
+  UNION ALL SELECT 30, 'Curtain Layers'
+  UNION ALL SELECT 31, 'Curly Shag'
+  UNION ALL SELECT 32, 'Long Soft Waves'
+  UNION ALL SELECT 33, 'Long Face-Framing Layers'
+  UNION ALL SELECT 34, 'Side-Swept Lob'
+  UNION ALL SELECT 35, 'Asymmetrical Bob'
+  UNION ALL SELECT 36, 'Long Side-Parted Waves'
+  UNION ALL SELECT 37, 'Soft Wavy Layers'
+  UNION ALL SELECT 38, 'Curtain Bangs'
+  UNION ALL SELECT 39, 'Layered Lob'
+  UNION ALL SELECT 40, 'Side-Parted Shag'
+  UNION ALL SELECT 41, 'Long Feathered Layers'
+  UNION ALL SELECT 42, 'Chin-Length Bob'
+  UNION ALL SELECT 43, 'Side-Swept Fringe'
+  UNION ALL SELECT 44, 'Collarbone Layers'
+  UNION ALL SELECT 45, 'Textured Lob'
+  UNION ALL SELECT 46, 'Wavy Chin-Length Cut'
+  UNION ALL SELECT 47, 'Wavy Shoulder Cut'
+  UNION ALL SELECT 48, 'Rounded Bob'
+  UNION ALL SELECT 49, 'Layered Shag'
+  UNION ALL SELECT 50, 'Full Fringe with Waves'
+  UNION ALL SELECT 51, 'Side-Swept Bangs'
+  UNION ALL SELECT 52, 'Shoulder-Length Layers'
+  UNION ALL SELECT 53, 'Soft Wavy Lob'
+) AS styles
+WHERE s.is_active = TRUE
+  AND (
+    s.external_id = 'teves-salon-spa'
+    OR (
+      (LOWER(s.name) LIKE '%salon%' OR LOWER(s.name) LIKE '%hair%'
+       OR LOWER(COALESCE(s.description, '')) LIKE '%hair%')
+      AND LOWER(COALESCE(s.description, '')) NOT LIKE '%nail%'
+      AND MOD(s.id + styles.style_index, 3) = 0
+    )
+  );
 
 -- Non-login demo staff profiles for customer-facing salon previews.
 -- The random password hash has no known login password.

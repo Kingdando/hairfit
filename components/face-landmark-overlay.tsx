@@ -34,7 +34,7 @@ export function FaceLandmarkOverlay({ uri, imageSize, landmarks }: Props) {
 }
 
 const styles = StyleSheet.create({
-  container: { width: '100%', height: '100%', overflow: 'hidden', backgroundColor: '#292326' },
+  container: { width: '100%', height: '100%', overflow: 'hidden', backgroundColor: '#24251F' },
   image: { ...StyleSheet.absoluteFillObject, width: '100%', height: '100%', resizeMode: 'cover' },
-  point: { position: 'absolute', width: 3, height: 3, borderRadius: 2, backgroundColor: '#7CFFD5', shadowColor: '#003D31', shadowOpacity: .9, shadowRadius: 2, elevation: 2 },
+  point: { position: 'absolute', width: 3, height: 3, borderRadius: 2, backgroundColor: '#8BCF35', shadowColor: '#25430D', shadowOpacity: .9, shadowRadius: 2, elevation: 2 },
 });

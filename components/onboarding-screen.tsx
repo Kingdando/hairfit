@@ -12,12 +12,12 @@ import {
 } from 'react-native';
 
 const colors = {
-  rose: '#A94F67',
-  roseDark: '#743548',
-  blush: '#F7E4E8',
-  pale: '#FFF8F6',
-  ink: '#292326',
-  muted: '#7C7074',
+  rose: '#397A24',
+  roseDark: '#25430D',
+  blush: '#E6F8C5',
+  pale: '#FFFFFF',
+  ink: '#24251F',
+  muted: '#397A24',
   white: '#FFFFFF',
 };
 
@@ -30,9 +30,10 @@ const slides = [
 type OnboardingScreenProps = {
   onGetStarted: () => void;
   onLogin: () => void;
+  onGuest: () => void;
 };
 
-export function OnboardingScreen({ onGetStarted, onLogin }: OnboardingScreenProps) {
+export function OnboardingScreen({ onGetStarted, onLogin, onGuest }: OnboardingScreenProps) {
   const [activeSlide, setActiveSlide] = useState(0);
   const [pageWidth, setPageWidth] = useState(0);
   const pager = useRef<ScrollView>(null);
@@ -77,6 +78,12 @@ export function OnboardingScreen({ onGetStarted, onLogin }: OnboardingScreenProp
         style={styles.pager}>
         {slides.map((slide, index) => (
           <View key={slide.title} style={[styles.page, { width: pageWidth || 1 }]}>
+            <View style={styles.brand}>
+              <View style={styles.brandMark}>
+                <Ionicons name="cut-outline" size={17} color={colors.white} />
+              </View>
+              <Text style={styles.brandName}>FACEFIT</Text>
+            </View>
             <View style={styles.artArea}>
               <View style={styles.artCircle}>
                 <Ionicons name={slide.icon} size={90} color={colors.rose} />
@@ -96,6 +103,7 @@ export function OnboardingScreen({ onGetStarted, onLogin }: OnboardingScreenProp
               <Pressable accessibilityRole="button" onPress={onLogin} style={({ pressed }) => [styles.login, pressed && styles.pressed]}>
                 <Text style={styles.loginText}>Already have an account? Log in</Text>
               </Pressable>
+              {index === slides.length - 1 && <Pressable accessibilityRole="button" onPress={onGuest} style={({ pressed }) => [styles.login, pressed && styles.pressed]}><Text style={styles.loginText}>Continue as guest · scan once</Text></Pressable>}
             </View>
           </View>
         ))}
@@ -107,19 +115,22 @@ export function OnboardingScreen({ onGetStarted, onLogin }: OnboardingScreenProp
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.pale },
   pager: { flex: 1 },
-  page: { flex: 1, paddingHorizontal: 22, paddingTop: 54, paddingBottom: 22, justifyContent: 'space-between' },
+  page: { flex: 1, paddingHorizontal: 26, paddingTop: 58, paddingBottom: 28, justifyContent: 'space-between' },
+  brand: { flexDirection: 'row', alignItems: 'center', gap: 8, alignSelf: 'flex-start' },
+  brandMark: { width: 30, height: 30, borderRadius: 10, backgroundColor: colors.rose, alignItems: 'center', justifyContent: 'center' },
+  brandName: { color: colors.roseDark, fontSize: 12, fontWeight: '900', letterSpacing: 1.6 },
   skip: { position: 'absolute', zIndex: 2, top: 10, right: 14, minWidth: 60, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
   link: { color: colors.rose, fontSize: 14, fontWeight: '700' },
   artArea: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  artCircle: { width: 250, height: 250, borderRadius: 125, backgroundColor: colors.blush, alignItems: 'center', justifyContent: 'center' },
-  matchBadge: { position: 'absolute', right: 25, bottom: '30%', padding: 12, borderRadius: 8, backgroundColor: colors.white, shadowColor: '#000000', shadowOpacity: 0.12, shadowRadius: 12, elevation: 4 },
+  artCircle: { width: 268, height: 268, borderRadius: 134, backgroundColor: colors.blush, borderWidth: 1, borderColor: '#DCEBC8', alignItems: 'center', justifyContent: 'center' },
+  matchBadge: { position: 'absolute', right: 25, bottom: '30%', paddingHorizontal: 15, paddingVertical: 12, borderRadius: 15, backgroundColor: colors.white, shadowColor: '#25430D', shadowOpacity: 0.12, shadowRadius: 16, elevation: 4 },
   matchText: { color: colors.rose, fontSize: 12, fontWeight: '800' },
   dots: { height: 12, flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: 20 },
-  dot: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#D9CBCF' },
+  dot: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#DCEBC8' },
   dotActive: { width: 26, backgroundColor: colors.rose },
-  title: { color: colors.ink, fontSize: 38, lineHeight: 46, fontWeight: '800', marginBottom: 10 },
-  body: { color: colors.muted, fontSize: 15, lineHeight: 23, marginBottom: 18 },
-  button: { minHeight: 54, borderRadius: 18, paddingHorizontal: 18, flexDirection: 'row', gap: 9, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.rose },
+  title: { color: colors.ink, fontSize: 40, lineHeight: 47, letterSpacing: -0.7, fontWeight: '800', marginBottom: 12 },
+  body: { color: colors.muted, fontSize: 15, lineHeight: 24, marginBottom: 22 },
+  button: { minHeight: 56, borderRadius: 18, paddingHorizontal: 18, flexDirection: 'row', gap: 9, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.rose },
   buttonText: { color: colors.white, fontSize: 16, fontWeight: '800' },
   login: { minHeight: 48, alignItems: 'center', justifyContent: 'center' },
   loginText: { color: colors.roseDark, fontSize: 14, fontWeight: '700' },
