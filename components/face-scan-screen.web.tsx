@@ -84,7 +84,9 @@ export function FaceScanScreen({ onBack, onCaptured }: FaceScanScreenProps) {
       context?.clearRect(0, 0, width, height);
       const result = landmarker.detectForVideo(video, performance.now());
       const landmarks = result.faceLandmarks[0];
-      setTracking(landmarks ? 'locked' : 'searching');
+      const hasSingleFace = result.faceLandmarks.length === 1;
+      setTracking(hasSingleFace ? 'locked' : 'searching');
+      setErrorText(result.faceLandmarks.length > 1 ? 'Keep only one face in the camera frame.' : '');
 
       if (context && landmarks) {
         const scale = Math.max(width / video.videoWidth, height / video.videoHeight);
@@ -92,8 +94,8 @@ export function FaceScanScreen({ onBack, onCaptured }: FaceScanScreenProps) {
         const renderedHeight = video.videoHeight * scale;
         const offsetX = (width - renderedWidth) / 2;
         const offsetY = (height - renderedHeight) / 2;
-        context.fillStyle = '#8BCF35';
-        context.shadowColor = '#25430D';
+        context.fillStyle = '#6F946E';
+        context.shadowColor = '#355C45';
         context.shadowBlur = 3;
         for (const point of landmarks) {
           context.beginPath();
@@ -116,14 +118,19 @@ export function FaceScanScreen({ onBack, onCaptured }: FaceScanScreenProps) {
         if (!landmarkerRef.current) {
           const mediaPipe = await loadMediaPipe();
           const vision = await mediaPipe.FilesetResolver.forVisionTasks(WASM_URL);
-          landmarkerRef.current = await mediaPipe.FaceLandmarker.createFromOptions(vision, {
+          const landmarker = await mediaPipe.FaceLandmarker.createFromOptions(vision, {
             baseOptions: { modelAssetPath: MODEL_URL, delegate: 'GPU' },
             runningMode: 'VIDEO',
-            numFaces: 1,
+            numFaces: 2,
             minFaceDetectionConfidence: 0.55,
             minFacePresenceConfidence: 0.55,
             minTrackingConfidence: 0.55,
           });
+          if (disposed) {
+            landmarker.close();
+            return;
+          }
+          landmarkerRef.current = landmarker;
         }
         if (disposed) return;
         const stream = await navigator.mediaDevices.getUserMedia({
@@ -139,9 +146,13 @@ export function FaceScanScreen({ onBack, onCaptured }: FaceScanScreenProps) {
         if (!video) return;
         video.srcObject = stream;
         await video.play();
+        if (disposed) return;
+        lastVideoTime.current = -1;
         setTracking('searching');
         animationRef.current = requestAnimationFrame(drawFrame);
       } catch (error) {
+        if (disposed) return;
+        stopCamera();
         setTracking('error');
         setErrorText(error instanceof Error ? error.message : 'Camera or face tracking could not start.');
       }
@@ -153,11 +164,14 @@ export function FaceScanScreen({ onBack, onCaptured }: FaceScanScreenProps) {
     };
   }, [drawFrame, facing, stopCamera]);
 
-  useEffect(() => () => landmarkerRef.current?.close(), []);
+  useEffect(() => () => {
+    landmarkerRef.current?.close();
+    landmarkerRef.current = null;
+  }, []);
 
   const takePhoto = () => {
     const video = videoRef.current;
-    if (!video || video.readyState < 2 || capturing) return;
+    if (!video || video.readyState < 2 || capturing || tracking !== 'locked') return;
     setCapturing(true);
     try {
       const canvas = document.createElement('canvas');
@@ -209,7 +223,7 @@ export function FaceScanScreen({ onBack, onCaptured }: FaceScanScreenProps) {
         <View style={styles.preview}>
           <video ref={videoRef} autoPlay muted playsInline style={{ ...webStyles.media, ...mirrorStyle }} />
           <canvas ref={overlayRef} style={{ ...webStyles.media, ...webStyles.overlay, ...mirrorStyle }} />
-          <View pointerEvents="none" style={styles.guideArea}>
+          <View style={[styles.guideArea, { pointerEvents: "none" }]}>
             <View style={styles.statusPill}>
               {tracking === 'loading' ? <ActivityIndicator size="small" color="#fff" /> : <View style={[styles.statusDot, tracking === 'locked' && styles.statusDotReady, tracking === 'error' && styles.statusDotError]} />}
               <Text style={styles.statusText}>{statusText}</Text>
@@ -220,7 +234,7 @@ export function FaceScanScreen({ onBack, onCaptured }: FaceScanScreenProps) {
 
           <View style={styles.controls}>
             <Pressable accessibilityRole="button" onPress={pickImage} style={styles.toolButton}><Ionicons name="images-outline" size={23} color="#fff" /><Text style={styles.toolLabel}>Gallery</Text></Pressable>
-            <Pressable accessibilityRole="button" disabled={tracking === 'loading' || tracking === 'error'} onPress={takePhoto} style={[styles.shutter, (tracking === 'loading' || tracking === 'error') && styles.disabled]}><View style={styles.shutterInner}>{capturing && <ActivityIndicator color="#fff" />}</View></Pressable>
+            <Pressable accessibilityRole="button" accessibilityLabel="Capture face photo" disabled={tracking !== 'locked' || capturing} onPress={takePhoto} style={[styles.shutter, (tracking !== 'locked' || capturing) && styles.disabled]}><View style={styles.shutterInner}>{capturing && <ActivityIndicator color="#fff" />}</View></Pressable>
             <Pressable accessibilityRole="button" onPress={() => setFacing(current => current === 'user' ? 'environment' : 'user')} style={styles.toolButton}><Ionicons name="camera-reverse-outline" size={25} color="#fff" /><Text style={styles.toolLabel}>Flip</Text></Pressable>
           </View>
         </View>
@@ -235,20 +249,20 @@ const webStyles = {
 };
 
 const styles = StyleSheet.create({
-  shell: { flex: 1, width: '100%', backgroundColor: '#25430D' },
+  shell: { flex: 1, width: '100%', backgroundColor: '#355C45' },
   safe: { flex: 1 },
-  header: { height: 70, paddingHorizontal: 16, flexDirection: 'row', alignItems: 'center', backgroundColor: '#25430D' },
-  headerButton: { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center', backgroundColor: '#397A24' },
+  header: { height: 70, paddingHorizontal: 16, flexDirection: 'row', alignItems: 'center', backgroundColor: '#355C45' },
+  headerButton: { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center', backgroundColor: '#4A765A' },
   headerCopy: { flex: 1, alignItems: 'center' },
   headerTitle: { color: '#fff', fontSize: 17, fontWeight: '800' },
-  headerSubtitle: { color: '#DCEBC8', fontSize: 11, marginTop: 2 },
+  headerSubtitle: { color: '#E2E9E2', fontSize: 11, marginTop: 2 },
   secureIcon: { width: 42, height: 42, alignItems: 'center', justifyContent: 'center' },
-  preview: { flex: 1, overflow: 'hidden', backgroundColor: '#24251F' },
-  guideArea: { ...StyleSheet.absoluteFillObject, paddingTop: 28, paddingBottom: 148, alignItems: 'center', justifyContent: 'space-between' },
+  preview: { flex: 1, overflow: 'hidden', backgroundColor: '#29332D' },
+  guideArea: { ...StyleSheet.absoluteFill, paddingTop: 28, paddingBottom: 148, alignItems: 'center', justifyContent: 'space-between' },
   statusPill: { height: 34, paddingHorizontal: 13, borderRadius: 17, flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: 'rgba(20,16,18,0.72)' },
-  statusDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#8BCF35' },
-  statusDotReady: { backgroundColor: '#8BCF35' },
-  statusDotError: { backgroundColor: '#25430D' },
+  statusDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#6F946E' },
+  statusDotReady: { backgroundColor: '#6F946E' },
+  statusDotError: { backgroundColor: '#355C45' },
   statusText: { color: '#fff', fontSize: 12, fontWeight: '700' },
   faceGuide: { width: 230, height: 306, maxHeight: '68%', borderRadius: 115, borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.9)', backgroundColor: 'rgba(255,255,255,0.025)' },
   faceGuideHidden: { opacity: 0 },
@@ -258,6 +272,6 @@ const styles = StyleSheet.create({
   toolButton: { width: 64, height: 64, alignItems: 'center', justifyContent: 'center', gap: 5 },
   toolLabel: { color: '#fff', fontSize: 11, fontWeight: '600' },
   shutter: { width: 78, height: 78, borderRadius: 39, borderWidth: 4, borderColor: '#fff', alignItems: 'center', justifyContent: 'center' },
-  shutterInner: { width: 62, height: 62, borderRadius: 31, alignItems: 'center', justifyContent: 'center', backgroundColor: '#397A24' },
+  shutterInner: { width: 62, height: 62, borderRadius: 31, alignItems: 'center', justifyContent: 'center', backgroundColor: '#4A765A' },
   disabled: { opacity: 0.48 },
 });

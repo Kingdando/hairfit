@@ -16,6 +16,7 @@ async function initializeDatabase() {
 
   try {
     await connection.query(schema);
+    await require('../src/booking-routes').ensureBookingSchema(connection);
     console.log(`Database ${process.env.DB_NAME || 'facefit'} initialized successfully.`);
   } finally {
     await connection.end();

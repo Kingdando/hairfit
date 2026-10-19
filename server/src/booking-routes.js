@@ -1,0 +1,188 @@
+const { depositAmount, validateSlot, validateProof, fail } = require('./services/booking-policy');
+async function ensureBookingSchema(pool) {
+  // Appointment tracking also persists reminders across API restarts.
+  await pool.execute(`CREATE TABLE IF NOT EXISTS booking_deposits (
+    booking_id BIGINT UNSIGNED PRIMARY KEY, amount DECIMAL(10,2) NOT NULL,
+    status ENUM('unpaid','submitted','verified','rejected') NOT NULL DEFAULT 'unpaid',
+    reference VARCHAR(30) UNIQUE, receipt MEDIUMTEXT, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (booking_id) REFERENCES bookings(id) ON DELETE CASCADE)`);
+  await pool.execute(`CREATE TABLE IF NOT EXISTS booking_changes (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY, booking_id BIGINT UNSIGNED NOT NULL,
+    requested_at DATETIME NOT NULL, reason VARCHAR(500) NOT NULL,
+    status ENUM('pending','approved','rejected') NOT NULL DEFAULT 'pending',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (booking_id) REFERENCES bookings(id) ON DELETE CASCADE,
+    INDEX idx_change_booking (booking_id, status))`);
+  await pool.execute(`CREATE TABLE IF NOT EXISTS booking_queue (
+    booking_id BIGINT UNSIGNED PRIMARY KEY, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (booking_id) REFERENCES bookings(id) ON DELETE CASCADE)`);
+  // Older pending appointments predate the deposit feature. Prepare their
+  // payment records without changing confirmed/completed booking agreements.
+  await pool.execute(`INSERT IGNORE INTO booking_deposits (booking_id, amount, status)
+    SELECT b.id, ROUND(sv.price * 0.20, 2), IF(sv.price = 0, 'verified', 'unpaid')
+    FROM bookings b JOIN services sv ON sv.id=b.service_id
+    WHERE b.status='pending' AND b.appointment_at > DATE_ADD(UTC_TIMESTAMP(), INTERVAL 8 HOUR)`);
+  await require('./services/appointment-reminders').ensureAppointmentSchema(pool);
+}
+function registerBookingRoutes(app, pool, authenticate) {
+  const route = handler => async (req, res, next) => {
+    let db;
+    try { db = await pool.getConnection(); await db.beginTransaction(); const result = await handler(req, db); await db.commit(); res.json({ data: result }); }
+    catch (error) { if (db) await db.rollback(); if (error.code === 'ER_DUP_ENTRY') return res.status(409).json({ error: 'This GCash reference is already attached to another booking.' }); if (error.status) res.status(error.status).json({ error: error.message }); else next(error); }
+    finally { db?.release(); }
+  };
+  async function lockBooking(db, id, user, owner = false) {
+    // Always lock the salon before the booking, including competing schedule changes.
+    const [salons] = await db.execute(`SELECT s.* FROM salons s JOIN services sv ON sv.salon_id=s.id JOIN bookings b ON b.service_id=sv.id
+      WHERE b.id=? AND ${owner ? 's.owner_id' : 'b.user_id'}=? FOR UPDATE`, [id, user]);
+    if (!salons[0]) fail('Booking not found.', 404);
+    const [rows] = await db.execute(`SELECT b.*, DATE_FORMAT(b.appointment_at,'%Y-%m-%d %H:%i:00') AS appointmentSlot, sv.duration_minutes, sv.price FROM bookings b JOIN services sv ON sv.id=b.service_id WHERE b.id=? FOR UPDATE`, [id]);
+    return { booking: rows[0], salon: salons[0] };
+  }
+  async function checkConflict(db, booking, slot, salonId, includePending = false) {
+    const [conflicts] = await db.execute(`SELECT b.id FROM bookings b JOIN services sv ON sv.id=b.service_id
+      WHERE sv.salon_id=? AND b.status IN (${includePending ? "'pending','confirmed'" : "'confirmed'"}) AND b.id<>? AND (b.stylist_id=? OR b.stylist_id IS NULL OR ? IS NULL)
+      AND b.appointment_at < DATE_ADD(?, INTERVAL ? MINUTE)
+      AND DATE_ADD(b.appointment_at, INTERVAL sv.duration_minutes MINUTE) > ? LIMIT 1`,
+      [salonId, booking.id || 0, booking.stylist_id || null, booking.stylist_id || null, slot, booking.duration_minutes, slot]);
+    if (conflicts.length) fail('This time is already booked. Choose another time or staff member.', 409);
+  }
+  async function notify(db, user, title, message, destination, id) {
+    if (user) await db.execute('INSERT INTO notifications (user_id,title,message,destination,reference_id) VALUES (?,?,?,?,?)', [user,title,message,destination,id]);
+  }
+  app.post('/api/bookings', authenticate, route(async (req, db) => {
+    const { serviceId, stylistId = null, appointmentAt, notes = null, joinQueue = false } = req.body;
+    if (typeof joinQueue !== 'boolean' || (joinQueue && !stylistId)) fail('Choose a stylist to join the waiting queue.');
+    if (!Number.isInteger(serviceId) || (stylistId !== null && !Number.isInteger(stylistId))) fail('Choose a valid service and staff member.');
+    if (notes !== null && (typeof notes !== 'string' || notes.length > 500)) fail('Notes must be under 500 characters.');
+    const [rows] = await db.execute(`SELECT s.*, sv.price, sv.duration_minutes FROM salons s JOIN services sv ON sv.salon_id=s.id
+      WHERE sv.id=? AND sv.is_active=TRUE AND sv.deleted_at IS NULL AND s.is_active=TRUE FOR UPDATE`, [serviceId]);
+    const salon = rows[0]; if (!salon) fail('Service is no longer available.',404);
+    validateSlot(appointmentAt, salon, salon.duration_minutes);
+    if (stylistId) {
+      const [staff] = await db.execute('SELECT id FROM stylists WHERE id=? AND salon_id=? AND is_available=TRUE AND deleted_at IS NULL', [stylistId,salon.id]);
+      if (!staff.length) fail('Staff member is unavailable.');
+    }
+    let queued = joinQueue;
+    try { await checkConflict(db, { stylist_id: stylistId, duration_minutes: salon.duration_minutes }, appointmentAt, salon.id, true); }
+    catch (error) { if (error.status !== 409 || !joinQueue) throw error; queued = true; }
+    const [result] = await db.execute('INSERT INTO bookings (user_id,service_id,stylist_id,appointment_at,notes) VALUES (?,?,?,?,?)', [req.user.sub,serviceId,stylistId,appointmentAt,notes]);
+    if (queued) await db.execute('INSERT INTO booking_queue (booking_id) VALUES (?)',[result.insertId]);
+    const amount = depositAmount(salon.price);
+    await db.execute("INSERT INTO booking_deposits (booking_id,amount,status) VALUES (?,?,?)", [result.insertId,amount,amount === 0 ? 'verified' : 'unpaid']);
+    await notify(db, req.user.sub,'Booking submitted',`${salon.name} received your request. Submit the 20% deposit for confirmation.`,'bookings',result.insertId);
+    await notify(db,salon.owner_id,'New booking request','A customer submitted an appointment request.','owner-bookings',result.insertId);
+    if (queued) {
+      await notify(db,req.user.sub,'Joined stylist queue',`Booking #${result.insertId}: your requested time is a waiting time, not a guaranteed start. The salon will confirm when the stylist is free.`,'bookings',result.insertId);
+      await notify(db,salon.owner_id,'New waiting client',`Booking #${result.insertId} joined a stylist queue. Verify payment and confirm when the stylist becomes free.`,'owner-bookings',result.insertId);
+    }
+    return { id:result.insertId,status:'pending',depositAmount:amount, isQueued:queued };
+  }));
+  app.post('/api/bookings/:id/deposit', authenticate, route(async (req,db) => {
+    const { booking, salon } = await lockBooking(db,req.params.id,req.user.sub);
+    if (booking.status !== 'pending') fail('Only pending bookings can receive payment proof.');
+    const [queue]=await db.execute('SELECT booking_id FROM booking_queue WHERE booking_id=?',[booking.id]);
+    const soon=require('./services/appointment-reminders').philippineDateTime(new Date(Math.ceil((Date.now()+60000)/60000)*60000));
+    validateSlot(queue.length && soon>booking.appointmentSlot ? soon:booking.appointmentSlot, salon, booking.duration_minutes);
+    validateProof(req.body.reference,req.body.imageData);
+    await db.execute("INSERT IGNORE INTO booking_deposits (booking_id,amount,status) VALUES (?,?,'unpaid')", [booking.id,depositAmount(booking.price)]);
+    const [payments] = await db.execute('SELECT status, amount FROM booking_deposits WHERE booking_id=? FOR UPDATE',[booking.id]);
+    if (!payments[0] || !['unpaid','rejected'].includes(payments[0].status)) fail('Payment proof is already awaiting review or verified.',409);
+    await db.execute("UPDATE booking_deposits SET reference=?,receipt=?,status='submitted' WHERE booking_id=?",[req.body.reference.trim(),req.body.imageData,booking.id]);
+    const paymentAmount = Number(payments[0].amount).toFixed(2);
+    await notify(db,salon.owner_id,'Down payment submitted',`Booking #${booking.id}: PHP ${paymentAmount} payment proof submitted. Check the receipt and your GCash account, then verify payment and confirm the booking.`,'owner-bookings',booking.id);
+    await notify(db,booking.user_id,'Payment proof submitted',`${salon.name} received your PHP ${paymentAmount} payment proof for booking #${booking.id}. Awaiting salon verification; your appointment is not confirmed yet.`,'bookings',booking.id);
+    return { status:'submitted' };
+  }));
+  app.post('/api/bookings/:id/reschedule', authenticate, route(async (req,db) => {
+    const { booking, salon } = await lockBooking(db,req.params.id,req.user.sub);
+    const [tracking]=await db.execute('SELECT auto_cancelled FROM appointment_tracking WHERE booking_id=? AND appointment_at=?',[booking.id,booking.appointmentSlot]);
+    const missed=booking.status==='cancelled' && Boolean(tracking[0]?.auto_cancelled);
+    if (!missed && (!['pending','confirmed'].includes(booking.status) || new Date(booking.appointmentSlot.replace(' ', 'T') + '+08:00') <= new Date())) fail('Only upcoming active bookings or automatically cancelled appointments can be rescheduled.');
+    validateSlot(req.body.appointmentAt,salon,booking.duration_minutes);
+    if (req.body.appointmentAt === booking.appointmentSlot) fail('Choose a different appointment time.');
+    if (typeof req.body.reason !== 'string' || !req.body.reason.trim() || req.body.reason.length>500) fail('Enter a reason under 500 characters.');
+    const [existing] = await db.execute("SELECT id FROM booking_changes WHERE booking_id=? AND status='pending'",[booking.id]);
+    if (existing.length) fail('Your previous request is still awaiting salon approval.',409);
+    await checkConflict(db,booking,req.body.appointmentAt,salon.id);
+    await db.execute('INSERT INTO booking_changes (booking_id,requested_at,reason) VALUES (?,?,?)',[booking.id,req.body.appointmentAt,req.body.reason.trim()]);
+    await notify(db,salon.owner_id,'Reschedule request','A customer requested a new appointment time.','owner-bookings',booking.id);
+    return { status:'pending' };
+  }));
+  app.patch('/api/owner/bookings/:id/arrival', authenticate, route(async (req,db) => {
+    if (req.user.role!=='owner') fail('Salon owner access required.',403);
+    const { booking }=await lockBooking(db,req.params.id,req.user.sub,true);
+    if (booking.status!=='confirmed') fail('Only confirmed appointments can be checked in.',409);
+    const start=new Date(booking.appointmentSlot.replace(' ','T')+'+08:00');
+    const elapsed=Date.now()-start.getTime();
+    if (elapsed < -30*60000 || elapsed >= 15*60000) fail('Mark arrival from 30 minutes before the appointment until the 15-minute grace period ends.',409);
+    await db.execute('INSERT IGNORE INTO appointment_tracking (booking_id,appointment_at) VALUES (?,?)',[booking.id,booking.appointmentSlot]);
+    await db.execute('UPDATE appointment_tracking SET arrived_at=COALESCE(arrived_at,DATE_ADD(UTC_TIMESTAMP(),INTERVAL 8 HOUR)) WHERE booking_id=? AND appointment_at=?',[booking.id,booking.appointmentSlot]);
+    return { arrived:true };
+  }));
+  app.patch('/api/owner/bookings/:id/deposit', authenticate, route(async (req,db) => {
+    if (req.user.role!=='owner') fail('Salon owner access required.',403);
+    const { booking, salon } = await lockBooking(db,req.params.id,req.user.sub,true);
+    if (booking.status !== 'pending' || !['verified','rejected'].includes(req.body.status)) fail('Choose a valid payment review.');
+    const [result] = await db.execute("UPDATE booking_deposits SET status=? WHERE booking_id=? AND status='submitted'",[req.body.status,booking.id]);
+    if (!result.affectedRows) fail('No submitted payment to review.',409);
+    const verified = req.body.status === 'verified';
+    await notify(db,booking.user_id,verified ? 'Down payment verified' : 'Payment proof rejected',
+      verified
+        ? `${salon.name} verified your down payment for booking #${booking.id}. Your appointment is awaiting final salon confirmation.`
+        : `${salon.name} could not verify your payment proof for booking #${booking.id}. Check the reference and receipt, contact the salon if needed, then submit proof again.`,
+      'bookings',booking.id);
+    return { status:req.body.status };
+  }));
+  app.patch('/api/owner/bookings/:id/reschedule', authenticate, route(async (req,db) => {
+    if (req.user.role!=='owner') fail('Salon owner access required.',403);
+    const { booking,salon } = await lockBooking(db,req.params.id,req.user.sub,true);
+    const [tracking]=await db.execute('SELECT auto_cancelled FROM appointment_tracking WHERE booking_id=? AND appointment_at=?',[booking.id,booking.appointmentSlot]);
+    const missed=booking.status==='cancelled' && Boolean(tracking[0]?.auto_cancelled);
+    if (!['pending','confirmed'].includes(booking.status) && !missed) fail('This booking is no longer active.');
+    if (!['approved','rejected'].includes(req.body.status)) fail('Choose approve or reject.');
+    const [changes] = await db.execute("SELECT *, DATE_FORMAT(requested_at,'%Y-%m-%d %H:%i:00') AS requestedSlot FROM booking_changes WHERE booking_id=? AND status='pending' FOR UPDATE",[booking.id]);
+    const change=changes[0]; if (!change) fail('No pending schedule request.',409);
+    if (req.body.status==='approved') {
+      const slot = change.requestedSlot;
+      validateSlot(slot,salon,booking.duration_minutes); await checkConflict(db,booking,slot,salon.id);
+      await db.execute('UPDATE bookings SET appointment_at=?,status=? WHERE id=?',[slot,missed ? 'confirmed' : booking.status,booking.id]);
+      if (missed || booking.status==='confirmed') await db.execute('INSERT IGNORE INTO appointment_tracking (booking_id,appointment_at) VALUES (?,?)',[booking.id,slot]);
+    }
+    await db.execute('UPDATE booking_changes SET status=? WHERE id=?',[req.body.status,change.id]);
+    await notify(db,booking.user_id,'Schedule request reviewed',`Your reschedule request was ${req.body.status}. Your deposit remains attached to this booking.`,'bookings',booking.id);
+    return { status:req.body.status };
+  }));
+  app.patch('/api/owner/bookings/:bookingId', authenticate, route(async (req,db) => {
+    if (req.user.role!=='owner') fail('Salon owner access required.',403);
+    const {booking,salon}=await lockBooking(db,req.params.bookingId,req.user.sub,true);
+    const status=req.body.status;
+    if (!({pending:['confirmed','cancelled'],confirmed:['completed','cancelled']}[booking.status] || []).includes(status)) fail('This status change is not allowed.',409);
+    if (status==='confirmed') {
+      const [payments]=await db.execute('SELECT status FROM booking_deposits WHERE booking_id=?',[booking.id]);
+      if (payments[0] && payments[0].status!=='verified') fail('Verify the required down payment before confirming.',409);
+      const [slots]=await db.execute("SELECT DATE_FORMAT(appointment_at,'%Y-%m-%d %H:%i:00') AS slot FROM bookings WHERE id=?",[booking.id]);
+      const [queue]=await db.execute('SELECT booking_id FROM booking_queue WHERE booking_id=?',[booking.id]);
+      let actualSlot=slots[0].slot;
+      if (queue.length) {
+        const soon=require('./services/appointment-reminders').philippineDateTime(new Date(Math.ceil((Date.now()+60000)/60000)*60000));
+        actualSlot=actualSlot>soon ? actualSlot:soon;
+        const [ahead]=await db.execute(`SELECT q.booking_id FROM booking_queue q JOIN bookings b ON b.id=q.booking_id
+          WHERE b.stylist_id=? AND b.status='pending' AND DATE(b.appointment_at)=DATE(?) AND b.appointment_at<=?
+          ORDER BY q.created_at,q.booking_id LIMIT 1`,[booking.stylist_id,booking.appointmentSlot,actualSlot]);
+        if (ahead[0] && Number(ahead[0].booking_id)!==Number(booking.id)) fail('Another client is ahead in this stylist queue.',409);
+      }
+      validateSlot(actualSlot,salon,booking.duration_minutes); await checkConflict(db,booking,actualSlot,salon.id);
+      await db.execute('UPDATE bookings SET appointment_at=? WHERE id=?',[actualSlot,booking.id]);
+      await db.execute('DELETE FROM booking_queue WHERE booking_id=?',[booking.id]);
+      booking.appointmentSlot=actualSlot;
+    }
+    await db.execute('UPDATE bookings SET status=? WHERE id=?',[status,booking.id]);
+    if (status==='confirmed') await db.execute('INSERT IGNORE INTO appointment_tracking (booking_id,appointment_at) VALUES (?,?)',[booking.id,booking.appointmentSlot]);
+    if (status==='cancelled' || status==='completed') await db.execute('DELETE FROM booking_queue WHERE booking_id=?',[booking.id]);
+    if (status==='cancelled' || status==='completed') await db.execute("UPDATE booking_changes SET status='rejected' WHERE booking_id=? AND status='pending'",[booking.id]);
+    await notify(db,booking.user_id,`Booking ${status}`,`${salon.name} marked booking #${booking.id} as ${status}.${status === 'confirmed' ? ' Your appointment is now confirmed. Open My bookings to view your schedule.' : ''}`,'bookings',booking.id);
+    return {id:booking.id,status};
+  }));
+}
+module.exports = { ensureBookingSchema, registerBookingRoutes };

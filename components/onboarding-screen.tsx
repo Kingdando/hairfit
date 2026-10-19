@@ -12,12 +12,12 @@ import {
 } from 'react-native';
 
 const colors = {
-  rose: '#397A24',
-  roseDark: '#25430D',
-  blush: '#E6F8C5',
+  rose: '#4A765A',
+  roseDark: '#355C45',
+  blush: '#EDF5EE',
   pale: '#FFFFFF',
-  ink: '#24251F',
-  muted: '#397A24',
+  ink: '#29332D',
+  muted: '#4A765A',
   white: '#FFFFFF',
 };
 
@@ -122,11 +122,11 @@ const styles = StyleSheet.create({
   skip: { position: 'absolute', zIndex: 2, top: 10, right: 14, minWidth: 60, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
   link: { color: colors.rose, fontSize: 14, fontWeight: '700' },
   artArea: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  artCircle: { width: 268, height: 268, borderRadius: 134, backgroundColor: colors.blush, borderWidth: 1, borderColor: '#DCEBC8', alignItems: 'center', justifyContent: 'center' },
-  matchBadge: { position: 'absolute', right: 25, bottom: '30%', paddingHorizontal: 15, paddingVertical: 12, borderRadius: 15, backgroundColor: colors.white, shadowColor: '#25430D', shadowOpacity: 0.12, shadowRadius: 16, elevation: 4 },
+  artCircle: { width: 268, height: 268, borderRadius: 134, backgroundColor: colors.blush, borderWidth: 1, borderColor: '#E2E9E2', alignItems: 'center', justifyContent: 'center' },
+  matchBadge: { position: 'absolute', right: 25, bottom: '30%', paddingHorizontal: 15, paddingVertical: 12, borderRadius: 15, backgroundColor: colors.white, boxShadow: [{ offsetX: 0, offsetY: 0, blurRadius: 16, color: "rgba(53, 92, 69, 0.12)" }], elevation: 4 },
   matchText: { color: colors.rose, fontSize: 12, fontWeight: '800' },
   dots: { height: 12, flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: 20 },
-  dot: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#DCEBC8' },
+  dot: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#E2E9E2' },
   dotActive: { width: 26, backgroundColor: colors.rose },
   title: { color: colors.ink, fontSize: 40, lineHeight: 47, letterSpacing: -0.7, fontWeight: '800', marginBottom: 12 },
   body: { color: colors.muted, fontSize: 15, lineHeight: 24, marginBottom: 22 },

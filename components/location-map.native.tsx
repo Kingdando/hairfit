@@ -40,7 +40,7 @@ export function LocationMap({ coordinate, salons = [], onSelectSalon }: Location
         showsMyLocationButton={false}
         style={StyleSheet.absoluteFill}
         toolbarEnabled={false}>
-        <Marker coordinate={coordinate} pinColor="#397A24" title="You are here" />
+        <Marker coordinate={coordinate} pinColor="#4A765A" title="You are here" />
         {salons.map((salon) => {
           const initials = salon.name
             .split(/\s+/)
@@ -69,7 +69,7 @@ export function LocationMap({ coordinate, salons = [], onSelectSalon }: Location
         accessibilityRole="button"
         onPress={recenter}
         style={({ pressed }) => [styles.recenterButton, pressed && styles.pressed]}>
-        <Ionicons name="locate" size={22} color="#397A24" />
+        <Ionicons name="locate" size={22} color="#4A765A" />
       </Pressable>
     </View>
   );
@@ -88,10 +88,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: '#DCEBC8',
-    shadowColor: '#000000',
-    shadowOpacity: 0.14,
-    shadowRadius: 8,
+    borderColor: '#E2E9E2',
+    boxShadow: [{ offsetX: 0, offsetY: 0, blurRadius: 8, color: "rgba(0, 0, 0, 0.14)" }],
     elevation: 5,
   },
   pressed: { opacity: 0.8, transform: [{ scale: 0.97 }] },
@@ -101,12 +99,10 @@ const styles = StyleSheet.create({
     borderRadius: 15,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#397A24',
+    backgroundColor: '#4A765A',
     borderWidth: 3,
     borderColor: '#FFFFFF',
-    shadowColor: '#000000',
-    shadowOpacity: 0.2,
-    shadowRadius: 5,
+    boxShadow: [{ offsetX: 0, offsetY: 0, blurRadius: 5, color: "rgba(0, 0, 0, 0.2)" }],
     elevation: 6,
   },
   salonInitials: {
@@ -116,5 +112,5 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     letterSpacing: 0.5,
   },
-  salonLogoImage: { width: 40, height: 40, borderRadius: 12, resizeMode: 'cover' },
+  salonLogoImage: { width: 40, height: 40, borderRadius: 12, },
 });

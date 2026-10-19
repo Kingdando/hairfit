@@ -28,13 +28,13 @@ export function FaceLandmarkOverlay({ uri, imageSize, landmarks }: Props) {
       const left = offsetX + point.x * renderedWidth;
       const top = offsetY + point.y * renderedHeight;
       if (left < -2 || top < -2 || left > viewport.width + 2 || top > viewport.height + 2) return null;
-      return <View key={index} pointerEvents="none" style={[styles.point, { left: left - 1.5, top: top - 1.5 }]} />;
+      return <View key={index} style={[styles.point, { pointerEvents: 'none', left: left - 1.5, top: top - 1.5 }]} />;
     })}
   </View>;
 }
 
 const styles = StyleSheet.create({
-  container: { width: '100%', height: '100%', overflow: 'hidden', backgroundColor: '#24251F' },
-  image: { ...StyleSheet.absoluteFillObject, width: '100%', height: '100%', resizeMode: 'cover' },
-  point: { position: 'absolute', width: 3, height: 3, borderRadius: 2, backgroundColor: '#8BCF35', shadowColor: '#25430D', shadowOpacity: .9, shadowRadius: 2, elevation: 2 },
+  container: { width: '100%', height: '100%', overflow: 'hidden', backgroundColor: '#29332D' },
+  image: { ...StyleSheet.absoluteFill, width: '100%', height: '100%', },
+  point: { position: 'absolute', width: 3, height: 3, borderRadius: 2, backgroundColor: '#6F946E', boxShadow: [{ offsetX: 0, offsetY: 0, blurRadius: 2, color: "rgba(53, 92, 69, 0.9)" }], elevation: 2 },
 });

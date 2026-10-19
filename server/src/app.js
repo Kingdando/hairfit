@@ -23,6 +23,9 @@ app.use(cors({ origin: allowedOrigins.includes('*') ? true : allowedOrigins }));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
+require('./booking-routes').registerBookingRoutes(app, pool, authenticate);
+require('./staff-schedule').registerStaffSchedule(app, pool, authenticateOptional);
+
 // ... YOUR EXISTING ROUTES HERE ...
 
 // --- ADD THIS NEW AI HAIRSTYLE ROUTE ---
@@ -547,10 +550,18 @@ app.get('/api/owner/management', authenticate, async (request, response, next) =
     );
     const [bookings] = await pool.execute(
       `SELECT b.id, b.appointment_at AS appointmentAt, b.status, b.notes,
+              (bq.booking_id IS NOT NULL) AS isQueued, trk.arrived_at AS arrivedAt, trk.auto_cancelled AS autoCancelled,
+              dp.amount AS depositAmount, dp.status AS depositStatus, dp.reference AS depositReference,
+              dp.receipt AS depositReceipt, bc.id AS changeRequestId, bc.requested_at AS requestedAppointmentAt,
+              bc.reason AS changeReason,
               sv.name AS serviceName, sv.price, sv.duration_minutes AS durationMinutes,
               customer.full_name AS customerName, customer.email AS customerEmail,
               customer.phone AS customerPhone, stylist.full_name AS stylistName
        FROM bookings b
+       LEFT JOIN booking_queue bq ON bq.booking_id=b.id
+       LEFT JOIN appointment_tracking trk ON trk.booking_id=b.id AND trk.appointment_at=b.appointment_at
+       LEFT JOIN booking_deposits dp ON dp.booking_id=b.id
+       LEFT JOIN booking_changes bc ON bc.booking_id=b.id AND bc.status='pending'
        JOIN services sv ON sv.id = b.service_id
        JOIN users customer ON customer.id = b.user_id
        LEFT JOIN stylists st ON st.id = b.stylist_id
@@ -866,33 +877,6 @@ app.delete('/api/owner/review-replies/:replyId', authenticate, async (request, r
   }
 });
 
-app.patch('/api/owner/bookings/:bookingId', authenticate, async (request, response, next) => {
-  if (request.user.role !== 'owner') return response.status(403).json({ error: 'Salon owner access is required.' });
-  const bookingId = Number(request.params.bookingId);
-  const status = String(request.body.status || '');
-  if (!Number.isInteger(bookingId) || !['confirmed', 'completed', 'cancelled'].includes(status)) {
-    return response.status(400).json({ error: 'Choose a valid booking status.' });
-  }
-  try {
-    const [bookings] = await pool.execute(
-      `SELECT b.id, b.user_id AS userId, s.name AS salonName
-       FROM bookings b JOIN services sv ON sv.id = b.service_id
-       JOIN salons s ON s.id = sv.salon_id
-       WHERE b.id = ? AND s.owner_id = ? LIMIT 1`,
-      [bookingId, request.user.sub],
-    );
-    const booking = bookings[0];
-    if (!booking) return response.status(404).json({ error: 'Booking not found for this salon.' });
-    await pool.execute('UPDATE bookings SET status = ? WHERE id = ?', [status, bookingId]);
-    await pool.execute(
-      'INSERT INTO notifications (user_id, title, message, destination, reference_id) VALUES (?, ?, ?, ?, ?)',
-      [booking.userId, `Booking ${status}`, `${booking.salonName} marked your appointment as ${status}.`, 'bookings', bookingId],
-    );
-    return response.json({ data: { id: bookingId, status } });
-  } catch (error) {
-    return next(error);
-  }
-});
 
 app.get('/api/account/:section', authenticate, async (request, response, next) => {
   const queries = {
@@ -1084,28 +1068,16 @@ app.get('/api/salons/:salonId/staff', async (request, response, next) => {
       return response.status(400).json({ error: 'Choose a valid appointment time and service.' });
     }
     const [staff] = await pool.execute(
-      `SELECT st.id, u.full_name AS name, st.specialties, st.is_available AS isAvailable,
-              st.image_path AS imageUrl
-       FROM stylists st
-       JOIN users u ON u.id = st.user_id
-       WHERE st.salon_id = ? AND st.is_available = TRUE AND st.deleted_at IS NULL
-         ${hasSlot ? `AND EXISTS (
-           SELECT 1 FROM services requested
-           WHERE requested.id = ? AND requested.salon_id = st.salon_id AND requested.is_active = TRUE
-         )
-         AND NOT EXISTS (
-           SELECT 1 FROM bookings b
-           JOIN services booked_service ON booked_service.id = b.service_id
-           JOIN services requested ON requested.id = ?
-           WHERE b.stylist_id = st.id AND b.status IN ('pending', 'confirmed')
-             AND b.appointment_at < DATE_ADD(?, INTERVAL requested.duration_minutes MINUTE)
-             AND DATE_ADD(b.appointment_at, INTERVAL booked_service.duration_minutes MINUTE) > ?
-         )` : ''}
-       ORDER BY u.full_name`,
-      hasSlot
-        ? [request.params.salonId, Number(serviceId), Number(serviceId), appointmentAt, appointmentAt]
-        : [request.params.salonId],
-    );
+      `SELECT st.id,u.full_name AS name,st.specialties,st.is_available AS isAvailable,st.image_path AS imageUrl,
+       ${hasSlot ? `EXISTS (SELECT 1 FROM bookings b JOIN services sv ON sv.id=b.service_id
+         JOIN services requested ON requested.id=?
+         LEFT JOIN booking_queue q ON q.booking_id=b.id
+         WHERE (b.stylist_id=st.id OR b.stylist_id IS NULL) AND b.status IN ('pending','confirmed')
+         AND b.appointment_at<DATE_ADD(?,INTERVAL requested.duration_minutes MINUTE)
+         AND DATE_ADD(b.appointment_at,INTERVAL sv.duration_minutes MINUTE)>?)` : 'FALSE'} AS isBusy
+       FROM stylists st JOIN users u ON u.id=st.user_id
+       WHERE st.salon_id=? AND st.is_available=TRUE AND st.deleted_at IS NULL ORDER BY u.full_name`,
+      hasSlot ? [Number(serviceId),appointmentAt,appointmentAt,request.params.salonId] : [request.params.salonId]);
     response.json({ data: staff });
   } catch (error) {
     next(error);
@@ -1239,11 +1211,19 @@ app.get('/api/bookings', authenticate, async (request, response, next) => {
   try {
     const [bookings] = await pool.execute(
       `SELECT b.id, b.appointment_at AS appointmentAt, b.status, b.notes,
+              (bq.booking_id IS NOT NULL) AS isQueued, trk.arrived_at AS arrivedAt, trk.auto_cancelled AS autoCancelled,
+              dp.amount AS depositAmount, dp.status AS depositStatus, dp.reference AS depositReference,
+              dp.receipt AS depositReceipt, bc.id AS changeRequestId, bc.requested_at AS requestedAppointmentAt,
+              bc.reason AS changeReason,
               sv.id AS serviceId, sv.name AS serviceName, sv.price,
               sv.duration_minutes AS durationMinutes,
               sa.id AS salonId, sa.name AS salonName,
               u.full_name AS stylistName
        FROM bookings b
+       LEFT JOIN booking_queue bq ON bq.booking_id=b.id
+       LEFT JOIN appointment_tracking trk ON trk.booking_id=b.id AND trk.appointment_at=b.appointment_at
+       LEFT JOIN booking_deposits dp ON dp.booking_id=b.id
+       LEFT JOIN booking_changes bc ON bc.booking_id=b.id AND bc.status='pending'
        JOIN services sv ON sv.id = b.service_id
        JOIN salons sa ON sa.id = sv.salon_id
        LEFT JOIN stylists st ON st.id = b.stylist_id
@@ -1258,62 +1238,6 @@ app.get('/api/bookings', authenticate, async (request, response, next) => {
   }
 });
 
-app.post('/api/bookings', authenticate, async (request, response, next) => {
-  const { serviceId, stylistId = null, appointmentAt, notes = null } = request.body;
-  if (!serviceId || !appointmentAt) {
-    return response.status(400).json({ error: 'serviceId and appointmentAt are required.' });
-  }
-  const appointmentDate = new Date(String(appointmentAt).replace(' ', 'T'));
-  if (Number.isNaN(appointmentDate.getTime()) || appointmentDate <= new Date()) {
-    return response.status(400).json({ error: 'Choose an appointment date and time in the future.' });
-  }
-
-  try {
-    const [bookingOptions] = await pool.execute(
-      `SELECT sv.id, sv.name AS serviceName, s.name AS salonName, s.owner_id AS ownerId,
-              u.full_name AS customerName
-       FROM services sv JOIN salons s ON s.id = sv.salon_id
-       JOIN users u ON u.id = ?
-       WHERE sv.id = ? AND sv.is_active = TRUE AND sv.deleted_at IS NULL AND s.is_active = TRUE
-       LIMIT 1`,
-      [request.user.sub, serviceId],
-    );
-    const bookingDetails = bookingOptions[0];
-    if (!bookingDetails) return response.status(404).json({ error: 'The selected salon service is no longer available.' });
-    if (stylistId) {
-      const [availableStaff] = await pool.execute(
-        `SELECT st.id FROM stylists st
-         JOIN services sv ON sv.salon_id = st.salon_id
-         WHERE st.id = ? AND sv.id = ? AND st.is_available = TRUE
-           AND st.deleted_at IS NULL AND sv.deleted_at IS NULL AND sv.is_active = TRUE`,
-        [stylistId, serviceId],
-      );
-      if (!availableStaff.length) {
-        return response.status(400).json({ error: 'The selected staff member is not available for this salon.' });
-      }
-    }
-    const [result] = await pool.execute(
-      `INSERT INTO bookings (user_id, service_id, stylist_id, appointment_at, notes)
-       VALUES (?, ?, ?, ?, ?)`,
-      [request.user.sub, serviceId, stylistId, appointmentAt, notes],
-    );
-    await pool.execute(
-      `INSERT INTO notifications (user_id, title, message, destination, reference_id)
-       VALUES (?, 'Booking submitted', ?, 'bookings', ?)`,
-      [request.user.sub, `${bookingDetails.salonName} received your ${bookingDetails.serviceName} appointment request.`, result.insertId],
-    );
-    if (bookingDetails.ownerId) {
-      await pool.execute(
-        `INSERT INTO notifications (user_id, title, message, destination, reference_id)
-         VALUES (?, 'New booking request', ?, 'owner-bookings', ?)`,
-        [bookingDetails.ownerId, `${bookingDetails.customerName} requested ${bookingDetails.serviceName}.`, result.insertId],
-      );
-    }
-    return response.status(201).json({ data: { id: result.insertId, status: 'pending' } });
-  } catch (error) {
-    return next(error);
-  }
-});
 
 app.use((_request, response) => response.status(404).json({ error: 'Route not found.' }));
 

@@ -79,7 +79,7 @@ export function OwnerSalonSetupScreen({ token, defaultName, onComplete, onLogout
           <Text style={styles.title}>Finish your salon profile</Text>
         </View>
         <Pressable accessibilityRole="button" accessibilityLabel="Log out" onPress={onLogout} style={styles.logout}>
-          <Ionicons name="log-out-outline" size={19} color="#25430D" />
+          <Ionicons name="log-out-outline" size={19} color="#355C45" />
         </Pressable>
       </View>
 
@@ -97,21 +97,21 @@ export function OwnerSalonSetupScreen({ token, defaultName, onComplete, onLogout
             <Image source={{ uri: logoUri }} style={styles.logo} />
           ) : (
             <View style={styles.logoPlaceholder}>
-              <Ionicons name="images-outline" size={22} color="#397A24" />
+              <Ionicons name="images-outline" size={22} color="#4A765A" />
             </View>
           )}
           <View style={styles.logoCopy}>
             <Text style={styles.logoText}>{logoUri ? 'Change salon logo' : 'Add a salon logo'}</Text>
             <Text style={styles.logoHint}>A square image works best</Text>
           </View>
-          <Ionicons name="chevron-forward" size={18} color="#397A24" />
+          <Ionicons name="chevron-forward" size={18} color="#4A765A" />
         </Pressable>
       </View>
 
       <View style={styles.section}>
         <View style={styles.locationHeading}>
           <View style={styles.locationIcon}>
-            <Ionicons name="location-outline" size={18} color="#397A24" />
+            <Ionicons name="location-outline" size={18} color="#4A765A" />
           </View>
           <View style={styles.locationCopy}>
             <Text style={styles.sectionTitle}>Pin your location</Text>
@@ -161,30 +161,30 @@ function Field({ label, value, onChange }: { label: string; value: string; onCha
 const styles = StyleSheet.create({
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 16, marginBottom: 8 },
   headerCopy: { flex: 1 },
-  kicker: { fontSize: 10, fontWeight: '900', letterSpacing: 1.5, color: '#397A24', marginBottom: 7 },
-  title: { fontSize: 29, lineHeight: 35, letterSpacing: -0.65, fontWeight: '900', color: '#24251F' },
-  body: { fontSize: 14, lineHeight: 22, color: '#25430D', marginBottom: 22 },
-  logout: { width: 44, height: 44, borderRadius: 16, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#DCEBC8', alignItems: 'center', justifyContent: 'center' },
-  section: { padding: 18, borderRadius: 24, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#DCEBC8', marginBottom: 16 },
-  sectionTitle: { fontSize: 16, fontWeight: '900', color: '#24251F', marginBottom: 13 },
+  kicker: { fontSize: 10, fontWeight: '900', letterSpacing: 1.5, color: '#4A765A', marginBottom: 7 },
+  title: { fontSize: 29, lineHeight: 35, letterSpacing: -0.65, fontWeight: '900', color: '#29332D' },
+  body: { fontSize: 14, lineHeight: 22, color: '#355C45', marginBottom: 22 },
+  logout: { width: 44, height: 44, borderRadius: 16, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E2E9E2', alignItems: 'center', justifyContent: 'center' },
+  section: { padding: 18, borderRadius: 24, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E2E9E2', marginBottom: 16 },
+  sectionTitle: { fontSize: 16, fontWeight: '900', color: '#29332D', marginBottom: 13 },
   fieldWrap: { marginBottom: 13 },
-  label: { fontSize: 10, fontWeight: '900', letterSpacing: 0.6, color: '#25430D', marginBottom: 7 },
-  field: { height: 52, borderRadius: 15, backgroundColor: '#F7FAF4', borderWidth: 1, borderColor: '#DCEBC8', paddingHorizontal: 14, fontSize: 14, color: '#24251F' },
-  logoPicker: { minHeight: 74, borderRadius: 17, backgroundColor: '#F7FAF4', borderWidth: 1, borderColor: '#DCEBC8', padding: 10, flexDirection: 'row', alignItems: 'center', gap: 11 },
+  label: { fontSize: 10, fontWeight: '900', letterSpacing: 0.6, color: '#355C45', marginBottom: 7 },
+  field: { height: 52, borderRadius: 15, backgroundColor: '#FAFBF8', borderWidth: 1, borderColor: '#E2E9E2', paddingHorizontal: 14, fontSize: 14, color: '#29332D' },
+  logoPicker: { minHeight: 74, borderRadius: 17, backgroundColor: '#FAFBF8', borderWidth: 1, borderColor: '#E2E9E2', padding: 10, flexDirection: 'row', alignItems: 'center', gap: 11 },
   logo: { width: 50, height: 50, borderRadius: 14 },
-  logoPlaceholder: { width: 50, height: 50, borderRadius: 14, backgroundColor: '#E6F8C5', alignItems: 'center', justifyContent: 'center' },
+  logoPlaceholder: { width: 50, height: 50, borderRadius: 14, backgroundColor: '#EDF5EE', alignItems: 'center', justifyContent: 'center' },
   logoCopy: { flex: 1 },
-  logoText: { fontSize: 12, fontWeight: '800', color: '#25430D' },
+  logoText: { fontSize: 12, fontWeight: '800', color: '#355C45' },
   logoHint: { fontSize: 10, color: '#58634E', marginTop: 3 },
   locationHeading: { flexDirection: 'row', alignItems: 'center', gap: 11, marginBottom: 13 },
-  locationIcon: { width: 38, height: 38, borderRadius: 13, backgroundColor: '#E6F8C5', alignItems: 'center', justifyContent: 'center' },
+  locationIcon: { width: 38, height: 38, borderRadius: 13, backgroundColor: '#EDF5EE', alignItems: 'center', justifyContent: 'center' },
   locationCopy: { flex: 1 },
   locationHint: { fontSize: 11, lineHeight: 16, color: '#58634E', marginTop: -9 },
-  mapFrame: { overflow: 'hidden', borderRadius: 18, borderWidth: 1, borderColor: '#DCEBC8', marginBottom: 14 },
+  mapFrame: { overflow: 'hidden', borderRadius: 18, borderWidth: 1, borderColor: '#E2E9E2', marginBottom: 14 },
   row: { flexDirection: 'row', gap: 10 },
   half: { flex: 1 },
-  error: { padding: 13, borderRadius: 15, backgroundColor: '#E6F8C5', color: '#25430D', marginBottom: 12 },
-  save: { minHeight: 56, borderRadius: 18, backgroundColor: '#397A24', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 9, marginTop: 3, marginBottom: 12, shadowColor: '#25430D', shadowOpacity: 0.15, shadowRadius: 12, shadowOffset: { width: 0, height: 5 }, elevation: 4 },
+  error: { padding: 13, borderRadius: 15, backgroundColor: '#EDF5EE', color: '#355C45', marginBottom: 12 },
+  save: { minHeight: 56, borderRadius: 18, backgroundColor: '#4A765A', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 9, marginTop: 3, marginBottom: 12, boxShadow: [{ offsetX: 0, offsetY: 5, blurRadius: 12, color: "rgba(53, 92, 69, 0.15)" }], elevation: 4 },
   saveText: { fontSize: 14, fontWeight: '900', color: '#FFFFFF' },
   disabled: { opacity: 0.6 },
 });

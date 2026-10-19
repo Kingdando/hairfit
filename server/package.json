@@ -11,7 +11,10 @@
     "salons:import": "node scripts/import-nasugbu-salons.js",
     "salons:preview": "node scripts/import-nasugbu-salons.js --dry-run",
     "owner:create": "node scripts/create-salon-owner.js",
-    "check": "node --check src/server.js && node --check src/app.js && node --check src/db.js && node --check scripts/init-db.js && node --check scripts/import-nasugbu-salons.js && node --check scripts/create-salon-owner.js"
+    "check": "node --check src/server.js && node --check src/app.js && node --check src/db.js && node --check scripts/init-db.js && node --check scripts/import-nasugbu-salons.js && node --check scripts/create-salon-owner.js && node --check src/booking-routes.js && node --check src/services/booking-policy.js && node --check src/services/appointment-reminders.js && node --check src/staff-schedule.js",
+    "test:bookings": "node --test tests/booking-policy.test.js",
+    "test:bookings:integration": "node --test tests/booking-flow.integration.js",
+    "test:staff": "node --test tests/staff-schedule.test.js"
   },
   "dependencies": {
     "@google/genai": "^2.24.0",

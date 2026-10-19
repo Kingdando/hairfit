@@ -50,3 +50,13 @@ export function salonStatusText(salon: SalonHours, now: Date = new Date()): stri
     ? `Open until ${formatSalonTime(salon.closing_time)}`
     : `Closed · Opens ${formatSalonTime(salon.opening_time)}`;
 }
+// Booking is always available; the appointment itself must fit salon hours.
+export function isSalonSlotAvailable(salon: SalonHours, value: string, duration: number): boolean {
+  const open = toMinutes(salon.opening_time), close = toMinutes(salon.closing_time);
+  const start = toMinutes(value);
+  if (start === null) return false;
+  if (open === null || close === null || open === close) return true;
+  const end = close > open ? close : close + 1440;
+  const adjusted = close > open || start >= open ? start : start + 1440;
+  return adjusted >= open && adjusted + duration <= end;
+}

@@ -1,4 +1,5 @@
 import { API_URL } from './api-config';
+import hairstyleCatalog from '../constants/hairstyle-catalog.json';
 
 export type Salon = {
   id: number;
@@ -29,6 +30,7 @@ export type SalonService = {
 };
 
 export type SalonStaff = {
+  isBusy?: boolean | number;
   id: number;
   name: string;
   specialties: string | null;
@@ -86,7 +88,19 @@ export type UserProfile = AuthUser & {
   faceShape: string | null;
 };
 type AuthResponse = { data: { user: AuthUser; token: string } };
-export type Booking = {
+export type BookingExtras = {
+  isQueued: boolean | number;
+  arrivedAt: string | null;
+  autoCancelled: boolean | number | null;
+  depositAmount: number | null;
+  depositStatus: 'unpaid' | 'submitted' | 'verified' | 'rejected' | null;
+  depositReference: string | null;
+  depositReceipt: string | null;
+  changeRequestId: number | null;
+  requestedAppointmentAt: string | null;
+  changeReason: string | null;
+};
+export type Booking = BookingExtras & {
   id: number;
   appointmentAt: string;
   status: 'pending' | 'confirmed' | 'completed' | 'cancelled';
@@ -133,7 +147,7 @@ export type OwnerDashboard = {
   todayBookings: number;
   pendingBookings: number;
 };
-export type OwnerBooking = {
+export type OwnerBooking = BookingExtras & {
   id: number;
   appointmentAt: string;
   status: Booking['status'];
@@ -294,7 +308,23 @@ export async function analyzeFace(token: string | null, imageData: string, style
   });
   const result = await response.json().catch(() => null);
   if (!response.ok) throw new Error(result?.error || `Face analysis failed (${response.status})`);
-  return (result as { data: FaceAnalysis }).data;
+  const analysis = (result as { data: FaceAnalysis }).data;
+  // Older Python processes may still return face measurements with an empty list.
+  // Use the restored Python catalog locally; this never generates paid images.
+  const audience = stylePreference === 'women' ? 'women' : 'men';
+  const catalog = hairstyleCatalog[audience][analysis.faceShape] || [];
+  const matches = (analysis.recommendations || []).filter((item) =>
+    item && typeof item.name === 'string' && item.name.trim() &&
+    typeof item.reason === 'string' && Number.isFinite(item.score));
+  for (const [name, score, reason] of catalog) {
+    if (matches.length >= 5) break;
+    if (matches.some((item) => item.name === name)) continue;
+    matches.push({
+      name: String(name), reason: String(reason), audience,
+      score: Math.round(Number(score) * (0.88 + Math.max(0, Math.min(1, Number(analysis.confidence) || 0)) * 0.12)),
+    });
+  }
+  return { ...analysis, recommendations: matches.slice(0, 5) };
 }
 
 export async function getOwnerDashboard(token: string) {
@@ -535,7 +565,7 @@ export async function getBookings(token: string) {
   return (result as { data: Booking[] }).data;
 }
 
-export async function createBooking(token: string, input: { serviceId: number; stylistId?: number; appointmentAt: string; notes?: string }) {
+export async function createBooking(token: string, input: { serviceId: number; stylistId?: number; appointmentAt: string; notes?: string; joinQueue?: boolean }) {
   const response = await fetchApi('/api/bookings', {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
@@ -544,4 +574,43 @@ export async function createBooking(token: string, input: { serviceId: number; s
   const result = await response.json().catch(() => null);
   if (!response.ok) throw new Error(result?.error || `API request failed (${response.status})`);
   return result.data as { id: number; status: string };
+}
+
+export async function submitBookingDeposit(token: string, id: number, reference: string, imageData: string) {
+  return bookingAction(token, `/api/bookings/${id}/deposit`, 'POST', { reference, imageData });
+}
+export async function requestBookingReschedule(token: string, id: number, appointmentAt: string, reason: string) {
+  return bookingAction(token, `/api/bookings/${id}/reschedule`, 'POST', { appointmentAt, reason });
+}
+export async function reviewBookingDeposit(token: string, id: number, status: 'verified' | 'rejected') {
+  return bookingAction(token, `/api/owner/bookings/${id}/deposit`, 'PATCH', { status });
+}
+export async function reviewBookingReschedule(token: string, id: number, status: 'approved' | 'rejected') {
+  return bookingAction(token, `/api/owner/bookings/${id}/reschedule`, 'PATCH', { status });
+}
+async function bookingAction(token: string, path: string, method: string, input: object) {
+  const response = await fetchApi(path, { method, headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(input) });
+  const result = await response.json().catch(() => null);
+  if (!response.ok) throw new Error(result?.error || 'Unable to update booking.');
+  return result.data;
+}
+
+export async function markBookingArrival(token: string, id: number) {
+  return bookingAction(token, `/api/owner/bookings/${id}/arrival`, 'PATCH', {});
+}
+
+export type StaffSchedule = {
+  date: string; openingTime: string | null; closingTime: string | null; canSeeClients: boolean;
+  staff: { id: number; name: string; isAvailable: boolean | number;
+    available: { start: string; end: string }[];
+    bookings: { start: string; end: string; status: string; isQueued?: boolean | number; unassigned: boolean; clientName?: string; clientLabel?: string; serviceName?: string }[];
+  }[];
+};
+export async function getStaffSchedule(salonId: number, date: string, token?: string | null) {
+  const response = await fetchApi(`/api/salons/${salonId}/staff-schedule?date=${encodeURIComponent(date)}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  const result = await response.json().catch(() => null);
+  if (!response.ok) throw new Error(result?.error === 'Route not found.' ? 'The API server needs restarting. Stop the old server, then run npm run dev from FaceFit/server.' : result?.error || 'Unable to load staff schedule.');
+  return result.data as StaffSchedule;
 }

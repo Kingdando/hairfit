@@ -15,11 +15,11 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 const colors = {
-  rose: '#397A24',
-  ink: '#24251F',
-  muted: '#E6F8C5',
+  rose: '#4A765A',
+  ink: '#29332D',
+  muted: '#EDF5EE',
   white: '#FFFFFF',
-  dark: '#25430D',
+  dark: '#355C45',
 };
 
 type FaceScanScreenProps = {
@@ -108,8 +108,8 @@ export function FaceScanScreen({ onBack, onCaptured }: FaceScanScreenProps) {
               style={StyleSheet.absoluteFill}
             />
 
-            <View pointerEvents="none" style={styles.previewShade} />
-            <View pointerEvents="none" style={styles.guideArea}>
+            <View style={[styles.previewShade, { pointerEvents: "none" }]} />
+            <View style={[styles.guideArea, { pointerEvents: "none" }]}>
               <View style={styles.statusPill}>
                 <View style={[styles.statusDot, cameraReady && styles.statusDotReady]} />
                 <Text style={styles.statusText}>{cameraReady ? 'Center your face' : 'Starting camera'}</Text>
@@ -175,17 +175,17 @@ const styles = StyleSheet.create({
   shellWeb: { maxWidth: '100%', alignSelf: 'stretch' },
   safe: { flex: 1 },
   header: { height: 70, paddingHorizontal: 16, flexDirection: 'row', alignItems: 'center', backgroundColor: colors.dark },
-  headerButton: { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center', backgroundColor: '#397A24' },
+  headerButton: { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center', backgroundColor: '#4A765A' },
   headerCopy: { flex: 1, alignItems: 'center' },
   headerTitle: { color: colors.white, fontSize: 17, fontWeight: '800' },
   headerSubtitle: { color: colors.muted, fontSize: 11, marginTop: 2 },
   secureIcon: { width: 42, height: 42, alignItems: 'center', justifyContent: 'center' },
-  preview: { flex: 1, overflow: 'hidden', backgroundColor: '#24251F' },
-  previewShade: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(16,12,14,0.14)' },
-  guideArea: { ...StyleSheet.absoluteFillObject, paddingTop: 28, paddingBottom: 148, alignItems: 'center', justifyContent: 'space-between' },
+  preview: { flex: 1, overflow: 'hidden', backgroundColor: '#29332D' },
+  previewShade: { ...StyleSheet.absoluteFill, backgroundColor: 'rgba(16,12,14,0.14)' },
+  guideArea: { ...StyleSheet.absoluteFill, paddingTop: 28, paddingBottom: 148, alignItems: 'center', justifyContent: 'space-between' },
   statusPill: { height: 34, paddingHorizontal: 13, borderRadius: 17, flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: 'rgba(20,16,18,0.72)' },
-  statusDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#8BCF35' },
-  statusDotReady: { backgroundColor: '#8BCF35' },
+  statusDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#6F946E' },
+  statusDotReady: { backgroundColor: '#6F946E' },
   statusText: { color: colors.white, fontSize: 12, fontWeight: '700' },
   faceGuide: { width: 230, height: 306, maxHeight: '68%', borderRadius: 115, borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.9)', backgroundColor: 'rgba(255,255,255,0.025)', overflow: 'hidden' },
   guideCorner: cornerBase,
@@ -203,9 +203,9 @@ const styles = StyleSheet.create({
   pressed: { opacity: 0.78, transform: [{ scale: 0.97 }] },
   disabled: { opacity: 0.48 },
   permissionState: { flex: 1, paddingHorizontal: 34, alignItems: 'center', justifyContent: 'center', backgroundColor: '#FFFFFF' },
-  permissionIcon: { width: 92, height: 92, borderRadius: 46, alignItems: 'center', justifyContent: 'center', backgroundColor: '#E6F8C5', marginBottom: 24 },
+  permissionIcon: { width: 92, height: 92, borderRadius: 46, alignItems: 'center', justifyContent: 'center', backgroundColor: '#EDF5EE', marginBottom: 24 },
   permissionTitle: { color: colors.ink, fontSize: 23, fontWeight: '800', marginBottom: 10 },
-  permissionBody: { color: '#397A24', fontSize: 14, lineHeight: 22, textAlign: 'center', marginBottom: 24 },
+  permissionBody: { color: '#4A765A', fontSize: 14, lineHeight: 22, textAlign: 'center', marginBottom: 24 },
   permissionButton: { width: '100%', minHeight: 54, borderRadius: 16, paddingHorizontal: 18, flexDirection: 'row', gap: 9, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.rose },
   permissionButtonText: { color: colors.white, fontSize: 15, fontWeight: '800' },
   galleryChoice: { minHeight: 50, paddingHorizontal: 18, flexDirection: 'row', gap: 8, alignItems: 'center', justifyContent: 'center' },
