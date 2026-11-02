@@ -1,6 +1,6 @@
 import type { OwnerTab } from './owner-tab-bar';
 import { Ionicons } from '@expo/vector-icons';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { type ComponentRef, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Image, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Svg, { Circle, G, Line, Path, Text as SvgText } from 'react-native-svg';
 
@@ -352,7 +352,7 @@ function DatePickerModal({ visible, selectedDate, maxDate, onSelect, onClose }: 
 }
 
 export function OwnerDashboardScreen({ scrollRequest, onSectionChange, dashboard, user, loading, error, unreadNotifications, desktop, onNotifications, onNavigate, onReload, onLogout }: Props) {
-  const scrollRef = useRef<ScrollView>(null);
+  const scrollRef = useRef<ComponentRef<typeof ScrollView>>(null);
   const anchors = useRef<Partial<Record<OwnerTab, number>>>({ dashboard: 0 });
   const lastRequest = useRef<number | null>(null);
   const [layoutVersion, setLayoutVersion] = useState(0);

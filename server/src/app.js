@@ -24,6 +24,8 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 require('./booking-routes').registerBookingRoutes(app, pool, authenticate);
+require('./stylist-routes').registerStylistRoutes(app, pool, authenticate);
+require('./stylist-workspace-routes').registerStylistWorkspaceRoutes(app, pool, authenticate);
 require('./staff-schedule').registerStaffSchedule(app, pool, authenticateOptional);
 
 // ... YOUR EXISTING ROUTES HERE ...
@@ -1078,6 +1080,14 @@ app.get('/api/salons/:salonId/staff', async (request, response, next) => {
        FROM stylists st JOIN users u ON u.id=st.user_id
        WHERE st.salon_id=? AND st.is_available=TRUE AND st.deleted_at IS NULL ORDER BY u.full_name`,
       hasSlot ? [Number(serviceId),appointmentAt,appointmentAt,request.params.salonId] : [request.params.salonId]);
+    if (hasSlot) {
+      const [settings] = await pool.execute(`SELECT st.id,ss.settings,sv.duration_minutes FROM stylists st
+        JOIN services sv ON sv.salon_id=st.salon_id LEFT JOIN stylist_settings ss ON ss.stylist_id=st.id
+        WHERE st.salon_id=? AND sv.id=? AND sv.is_active=TRUE AND sv.deleted_at IS NULL`, [request.params.salonId, Number(serviceId)]);
+      const { parse, allowsSlot } = require('./services/stylist-workspace');
+      const available = new Set(settings.filter(row => allowsSlot(parse(row.settings), String(appointmentAt), row.duration_minutes)).map(row => Number(row.id)));
+      return response.json({ data: staff.filter(member => available.has(Number(member.id))) });
+    }
     response.json({ data: staff });
   } catch (error) {
     next(error);

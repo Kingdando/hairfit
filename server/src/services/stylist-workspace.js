@@ -1,0 +1,68 @@
+const { fail } = require('./booking-policy');
+const parse = (value, fallback = {}) => { if (!value) return fallback; return typeof value === 'string' ? JSON.parse(value) : value; };
+async function ensureStylistSchema(db) {
+  await db.execute(`CREATE TABLE IF NOT EXISTS stylist_settings (
+    stylist_id BIGINT UNSIGNED PRIMARY KEY, settings JSON NOT NULL,
+    FOREIGN KEY(stylist_id) REFERENCES stylists(id) ON DELETE CASCADE)`);
+  await db.execute(`CREATE TABLE IF NOT EXISTS stylist_booking_details (
+    booking_id BIGINT UNSIGNED PRIMARY KEY, context JSON NULL,
+    stage VARCHAR(20) NOT NULL DEFAULT 'scheduled', stage_slot DATETIME NULL,
+    FOREIGN KEY(booking_id) REFERENCES bookings(id) ON DELETE CASCADE)`);
+  await db.execute(`CREATE TABLE IF NOT EXISTS stylist_portfolio (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY, stylist_id BIGINT UNSIGNED NOT NULL,
+    caption VARCHAR(300) NOT NULL, image_data MEDIUMTEXT NOT NULL, consent_at DATETIME NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(stylist_id) REFERENCES stylists(id) ON DELETE CASCADE)`);
+  await db.execute(`CREATE TABLE IF NOT EXISTS stylist_reviews (
+    booking_id BIGINT UNSIGNED PRIMARY KEY, rating TINYINT UNSIGNED NOT NULL,
+    comment VARCHAR(1000) NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(booking_id) REFERENCES bookings(id) ON DELETE CASCADE)`);
+}
+const validTime = value => typeof value === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
+function validateSettings(value) {
+  if (!value || !Array.isArray(value.weekly) || value.weekly.length !== 7 || !Array.isArray(value.blocks) || value.blocks.length > 100) fail('Provide a seven-day working schedule and at most 100 blocked periods.');
+  for (const day of value.weekly) {
+    if (!day || typeof day.enabled !== 'boolean' || !validTime(day.start) || !validTime(day.end) || day.start >= day.end) fail('Working hours must have a valid start and end on the same day.');
+    if (day.breakStart || day.breakEnd) {
+      if (!validTime(day.breakStart) || !validTime(day.breakEnd) || day.breakStart < day.start || day.breakEnd > day.end || day.breakStart >= day.breakEnd) fail('Breaks must fit inside working hours.');
+    }
+  }
+  for (const block of value.blocks) {
+    if (!block || !/^\d{4}-\d{2}-\d{2} ([01]\d|2[0-3]):[0-5]\d:00$/.test(block.start) || !/^\d{4}-\d{2}-\d{2} ([01]\d|2[0-3]):[0-5]\d:00$/.test(block.end) || block.start >= block.end || !validDateTime(block.start) || !validDateTime(block.end)) fail('Enter valid start and end dates for unavailable periods.');
+  }
+  return { weekly: value.weekly.map(d => ({ enabled: d.enabled, start: d.start, end: d.end, breakStart: d.breakStart || '', breakEnd: d.breakEnd || '' })), blocks: value.blocks.map(b => ({ start: b.start, end: b.end })) };
+}
+function validDateTime(value) {
+  const date = new Date(value.replace(' ', 'T') + '+08:00');
+  return Number.isFinite(date.getTime()) && new Date(date.getTime() + 8 * 3600000).toISOString().slice(0, 19).replace('T', ' ') === value;
+}
+function allowsSlot(settings, slot, duration) {
+  if (!settings.weekly) return true;
+  const date = new Date(slot.replace(' ', 'T') + '+08:00');
+  if (!Number.isFinite(date.getTime())) return false;
+  const dayKey = slot.slice(0, 10);
+  const weekday = new Date(dayKey + 'T12:00:00Z').getUTCDay();
+  const day = settings.weekly[weekday];
+  const end = new Date(date.getTime() + duration * 60000 + 8 * 3600000).toISOString().slice(0, 19).replace('T', ' ');
+  if (!day?.enabled || slot < `${dayKey} ${day.start}:00` || end > `${dayKey} ${day.end}:00`) return false;
+  if (day.breakStart && slot < `${dayKey} ${day.breakEnd}:00` && end > `${dayKey} ${day.breakStart}:00`) return false;
+  return !(settings.blocks || []).some(b => slot < b.end && end > b.start);
+}
+async function checkStylistAvailability(db, stylistId, slot, duration) {
+  if (!stylistId) return;
+  const [rows] = await db.execute('SELECT settings FROM stylist_settings WHERE stylist_id=?', [stylistId]);
+  if (rows[0] && !allowsSlot(parse(rows[0].settings), slot, duration)) fail('Your stylist is off, on a break, or unavailable at this time. Choose another time.');
+}
+function validateContext(context) {
+  if (context === undefined || context === null) return null;
+  if (typeof context !== 'object' || Array.isArray(context)) fail('Invalid hairstyle viewer details.');
+  const result = {};
+  for (const key of ['hairstyle', 'faceShape', 'hairLength', 'hairType']) {
+    if (context[key] != null && (typeof context[key] !== 'string' || context[key].length > 120)) fail('Hairstyle viewer details are too long.');
+    result[key] = context[key] || null;
+  }
+  if (context.referenceImage && (typeof context.referenceImage !== 'string' || context.referenceImage.length > 6000000 || !/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(context.referenceImage))) fail('Use a JPEG, PNG or WebP reference image under 4 MB.');
+  result.referenceImage = context.referenceImage || null;
+  return result;
+}
+module.exports = { ensureStylistSchema, parse, validateSettings, allowsSlot, checkStylistAvailability, validateContext };

@@ -1,6 +1,6 @@
-﻿import { useState } from 'react';
+import { useState } from 'react';
 import { ActivityIndicator, Image, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
-import { type Booking, type OwnerBooking, markBookingArrival, requestBookingReschedule, reviewBookingDeposit, reviewBookingReschedule, submitBookingDeposit } from '@/services/api';
+import { type Booking, type OwnerBooking, confirmClientArrival, reviewStylist, markBookingArrival, requestBookingReschedule, reviewBookingDeposit, reviewBookingReschedule, submitBookingDeposit } from '@/services/api';
 
 type Props = {
   booking: Booking | OwnerBooking;
@@ -11,7 +11,9 @@ type Props = {
   chooseReceipt?: () => Promise<{ uri: string; data: string } | null>;
 };
 export function BookingActions({ booking, token, owner, onUpdated, onRebook, chooseReceipt }: Props) {
-  const [mode, setMode] = useState<'deposit' | 'reschedule' | 'receipt' | null>(null);
+  const [mode, setMode] = useState<'deposit' | 'reschedule' | 'receipt' | 'review' | null>(null);
+  const [rating, setRating] = useState(5);
+  const [review, setReview] = useState('');
   const [reference, setReference] = useState('');
   const [receipt, setReceipt] = useState<{ uri: string; data: string } | null>(null);
   const [date, setDate] = useState('');
@@ -48,7 +50,7 @@ export function BookingActions({ booking, token, owner, onUpdated, onRebook, cho
     </View>}
     {booking.status === 'confirmed' && <View style={styles.notice}>
       <Text style={styles.title}>{booking.arrivedAt ? 'Client checked in' : '15-minute arrival grace period'}</Text>
-      <Text style={styles.copy}>{booking.arrivedAt ? 'Arrival was recorded by the salon.' : 'Please check in with the salon on arrival. Appointments without a recorded arrival are automatically cancelled 15 minutes after the scheduled start.'}</Text>
+      <Text style={styles.copy}>{booking.arrivedAt ? 'Arrival has been recorded.' : 'Confirm your arrival from 30 minutes before your appointment. Appointments without a recorded arrival are automatically cancelled 15 minutes after the scheduled start.'}</Text>
     </View>}
     {!!booking.autoCancelled && booking.status === 'cancelled' && <View style={styles.notice}>
       <Text style={styles.title}>Missed appointment ? choose a new schedule</Text>
@@ -70,6 +72,8 @@ export function BookingActions({ booking, token, owner, onUpdated, onRebook, cho
         {button('Reject payment proof', () => void run(() => reviewBookingDeposit(token, booking.id, 'rejected')), true)}
       </>}
     </> : <>
+      {booking.status === 'confirmed' && !booking.arrivedAt && button('I have arrived', () => void run(() => confirmClientArrival(token, booking.id)))}
+      {booking.status === 'completed' && booking.stylistName && button('Rate your hairstylist', () => open('review'), true)}
       {booking.status === 'pending' && (upcoming || !!booking.isQueued) && amount > 0 && ['unpaid', 'rejected'].includes(depositStatus || '') && button('Pay down payment / Upload receipt', () => open('deposit'))}
       {booking.status === 'confirmed' && !depositStatus && <Text style={styles.copy}>This booking was confirmed before down payments were introduced. Contact the salon about payment.</Text>}
       {((active && upcoming) || (booking.status === 'cancelled' && !!booking.autoCancelled)) && !booking.changeRequestId && button('Request reschedule', () => open('reschedule'), true)}
@@ -79,7 +83,8 @@ export function BookingActions({ booking, token, owner, onUpdated, onRebook, cho
     {!!error && !mode && <Text accessibilityRole="alert" style={styles.error}>{error}</Text>}
     <Modal visible={mode !== null} transparent animationType="fade" onRequestClose={() => { if (!busy) setMode(null); }}>
       <View style={styles.backdrop}><ScrollView contentContainerStyle={styles.modalScroll} keyboardShouldPersistTaps="handled"><View style={styles.sheet}>
-        <Text style={styles.heading}>{mode === 'deposit' ? 'Confirm with a down payment' : mode === 'reschedule' ? 'Request a new appointment time' : 'Payment receipt'}</Text>
+        <Text style={styles.heading}>{mode === 'review' ? 'Rate your hairstylist' : mode === 'deposit' ? 'Confirm with a down payment' : mode === 'reschedule' ? 'Request a new appointment time' : 'Payment receipt'}</Text>
+        {mode === 'review' && <><View style={{ flexDirection: 'row', gap: 8 }}>{[1,2,3,4,5].map(value => <Pressable accessibilityRole="button" accessibilityLabel={`${value} stars`} key={value} onPress={() => setRating(value)} style={styles.secondary}><Text style={styles.title}>{value <= rating ? '★' : '☆'}</Text></Pressable>)}</View><TextInput accessibilityLabel="Stylist review" placeholder="Tell us about your haircut" value={review} onChangeText={setReview} maxLength={1000} multiline style={styles.input}/>{button('Save review', () => void run(() => reviewStylist(token, booking.id, rating, review)))}</>}
         {mode === 'deposit' && <>
           <Text style={styles.copy}>Pay PHP {amount.toFixed(2)} (20%) through GCash. Contact the salon to confirm its GCash recipient before sending money. FaceFit does not charge your account.</Text>
           <Text style={styles.copy}>The salon verifies your receipt before confirming the appointment. The remaining balance is paid at the salon.</Text>

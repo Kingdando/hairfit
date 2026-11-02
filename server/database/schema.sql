@@ -60,6 +60,7 @@ CREATE TABLE IF NOT EXISTS stylists (
   user_id BIGINT UNSIGNED NOT NULL UNIQUE,
   salon_id BIGINT UNSIGNED NOT NULL,
   specialties VARCHAR(255),
+  description VARCHAR(500),
   is_available BOOLEAN NOT NULL DEFAULT TRUE,
   image_path VARCHAR(500),
   deleted_at DATETIME NULL,

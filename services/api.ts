@@ -30,6 +30,8 @@ export type SalonService = {
 };
 
 export type SalonStaff = {
+  description?: string | null;
+  hairstyleMatch?: boolean;
   isBusy?: boolean | number;
   id: number;
   name: string;
@@ -37,6 +39,10 @@ export type SalonStaff = {
   isAvailable: boolean;
   imageUrl: string | null;
 };
+export type RecommendedStylist = SalonStaff & { salonId: number; salonName: string };
+export async function getRecommendedStylists() {
+  return (await apiRequest<{ data: RecommendedStylist[] }>('/api/stylists')).data;
+}
 
 export type ReviewReply = {
   id: number;
@@ -78,6 +84,42 @@ export type MySalonReview = {
 };
 
 export type AuthUser = { id: number; fullName: string; email: string; phone: string | null; role: string };
+export type StylistAppointment = {
+  customerId: number; arrivedAt: string | null; autoCancelled: boolean | number;
+  stage: 'scheduled' | 'arrived' | 'in_progress' | 'completed' | 'no_show';
+  context: HaircutContext | null;
+  changeRequestId: number | null; requestedAppointmentAt: string | null; changeReason: string | null;
+  id: number; appointmentAt: string; status: 'pending' | 'confirmed' | 'completed' | 'cancelled';
+  notes: string | null; customerName: string; customerPhone: string | null;
+  serviceName: string; durationMinutes: number; isQueued: boolean | number;
+};
+export type StylistDashboard = {
+  fullName: string; phone: string | null; email: string; description: string | null;
+  openingTime: string | null; closingTime: string | null;
+  settings: Partial<StylistAvailability> & { experience?: string };
+  portfolio: { id: number; caption: string; imageUrl: string; createdAt: string }[];
+  reviews: { rating: number; comment: string; customerName: string; createdAt: string }[];
+  notifications: { id: number; title: string; message: string; isRead: boolean | number; createdAt: string; bookingId: number | null }[];
+  id: number; salonName: string; specialties: string | null; isAvailable: boolean | number;
+  imageUrl: string | null; bookings: StylistAppointment[];
+};
+export type HaircutContext = { hairstyle?: string | null; faceShape?: string | null; hairLength?: string | null; hairType?: string | null; referenceImage?: string | null };
+export type StylistDay = { enabled: boolean; start: string; end: string; breakStart: string; breakEnd: string };
+export type StylistAvailability = { isAvailable: boolean; weekly: StylistDay[]; blocks: { start: string; end: string }[] };
+export const updateStylistProfile = (token: string, input: { fullName: string; phone: string; specialties: string; description: string; experience: string }) => bookingAction(token, '/api/stylist/profile', 'PATCH', input);
+export const updateStylistAvailability = (token: string, input: StylistAvailability) => bookingAction(token, '/api/stylist/availability', 'PUT', input);
+export const updateStylistStatus = (token: string, id: number, status: string) => bookingAction(token, `/api/stylist/appointments/${id}/status`, 'PATCH', { status });
+export const reviewStylistReschedule = (token: string, id: number, status: 'approved' | 'rejected') => bookingAction(token, `/api/stylist/appointments/${id}/reschedule`, 'PATCH', { status });
+export const uploadStylistPortfolio = (token: string, caption: string, imageData: string, clientPermission: boolean) => bookingAction(token, '/api/stylist/portfolio', 'POST', { caption, imageData, clientPermission });
+export const deleteStylistPortfolio = (token: string, id: number) => bookingAction(token, `/api/stylist/portfolio/${id}`, 'DELETE', {});
+export const confirmClientArrival = (token: string, id: number) => bookingAction(token, `/api/bookings/${id}/arrival`, 'POST', {});
+export const reviewStylist = (token: string, id: number, rating: number, comment: string) => bookingAction(token, `/api/bookings/${id}/stylist-review`, 'POST', { rating, comment });
+export async function getStylistDashboard(token: string) {
+  const response = await fetchApi('/api/stylist/dashboard', { headers: { Authorization: `Bearer ${token}` } });
+  const result = await response.json().catch(() => null);
+  if (!response.ok) throw new Error(result?.error || `API request failed (${response.status})`);
+  return (result as { data: StylistDashboard }).data;
+}
 export type UserProfile = AuthUser & {
   createdAt: string;
   profileImageUrl: string | null;
@@ -565,7 +607,7 @@ export async function getBookings(token: string) {
   return (result as { data: Booking[] }).data;
 }
 
-export async function createBooking(token: string, input: { serviceId: number; stylistId?: number; appointmentAt: string; notes?: string; joinQueue?: boolean }) {
+export async function createBooking(token: string, input: { serviceId: number; stylistId?: number; appointmentAt: string; notes?: string; joinQueue?: boolean; context?: HaircutContext }) {
   const response = await fetchApi('/api/bookings', {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },

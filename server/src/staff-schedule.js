@@ -24,7 +24,7 @@ function registerStaffSchedule(app,pool,authenticateOptional) {
       const salon=salons[0];if (!salon) return res.status(404).json({error:'Salon not found.'});
       const canSeeClients=req.user?.role==='owner' && Number(req.user.sub)===Number(salon.owner_id);
       const window=dayWindow(date,salon.opening_time,salon.closing_time);
-      const [staff]=await pool.execute('SELECT st.id,u.full_name AS name,st.is_available AS isAvailable FROM stylists st JOIN users u ON u.id=st.user_id WHERE st.salon_id=? AND st.deleted_at IS NULL ORDER BY u.full_name',[salon.id]);
+      const [staff]=await pool.execute('SELECT st.id,u.full_name AS name,st.is_available AS isAvailable,ss.settings FROM stylists st JOIN users u ON u.id=st.user_id LEFT JOIN stylist_settings ss ON ss.stylist_id=st.id WHERE st.salon_id=? AND st.deleted_at IS NULL ORDER BY u.full_name',[salon.id]);
       // Signed-in clients see first-name labels; only the salon owner sees full names/services.
       const [bookings]=await pool.execute(`SELECT b.stylist_id AS staffId, b.status, (q.booking_id IS NOT NULL) AS isQueued,
         DATE_FORMAT(b.appointment_at,'%Y-%m-%d %H:%i:%s') AS \`start\`,
@@ -38,8 +38,19 @@ function registerStaffSchedule(app,pool,authenticateOptional) {
       const hoursKnown=Boolean(salon.opening_time && salon.closing_time);
       const data=staff.map(member=>{
         const occupied=bookings.filter(b=>Number(b.staffId)===Number(member.id) || (b.staffId===null && b.status==='confirmed'));
-        return {...member,bookings:occupied.map(({staffId,...b})=>({...b,unassigned:staffId===null})),
-          available:member.isAvailable && hoursKnown ? freeIntervals(availableStart,window.end,occupied.filter(b=>!b.isQueued)):[]};
+        const { settings: rawSettings, ...profile } = member;
+        const settings = require('./services/stylist-workspace').parse(rawSettings);
+        const weekday = new Date(date+'T12:00:00Z').getUTCDay();
+        const working = settings.weekly?.[weekday];
+        let start = availableStart, end = window.end;
+        const blocked = [...occupied.filter(b=>!b.isQueued), ...(settings.blocks || [])];
+        if (working) {
+          const shiftStart = `${date} ${working.start}:00`, shiftEnd = `${date} ${working.end}:00`;
+          start = start > shiftStart ? start : shiftStart; end = end < shiftEnd ? end : shiftEnd;
+          if (working.breakStart) blocked.push({start:`${date} ${working.breakStart}:00`,end:`${date} ${working.breakEnd}:00`});
+        }
+        return {...profile,bookings:occupied.map(({staffId,...b})=>({...b,unassigned:staffId===null})),
+          available:member.isAvailable && hoursKnown && (!working || working.enabled) && start < end ? freeIntervals(start,end,blocked):[]};
       });
       res.json({data:{date,openingTime:salon.opening_time,closingTime:salon.closing_time,canSeeClients,staff:data}});
     } catch(error){next(error);}

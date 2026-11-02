@@ -16,6 +16,9 @@ import { FaceScanScreen } from "@/components/face-scan-screen";
 import { FaceLandmarkOverlay } from "@/components/face-landmark-overlay";
 import { CustomerDashboardScreen } from "@/components/dashboards/customer-dashboard-screen";
 import { OwnerDashboardScreen } from "@/components/dashboards/owner-dashboard-screen";
+import { StylistDashboardScreen } from "@/components/dashboards/stylist-dashboard-screen";
+import { rankStylists } from "@/services/stylist-matching";
+import { HairstyleStylists } from "@/components/hairstyle-stylists";
 import { OwnerSalonSetupScreen } from "@/components/dashboards/owner-salon-setup-screen";
 import { LocationMap, type MapCoordinate } from "@/components/location-map";
 import { OnboardingScreen } from "@/components/onboarding-screen";
@@ -894,7 +897,7 @@ function OwnerEditorModal({
       visible
       animationType="slide"
       presentationStyle="pageSheet"
-      onRequestClose={() => !saving && setEditor(null)}
+      onRequestClose={() => { if (!saving) setEditor(null); }}
     >
       <SafeAreaView style={s.ownerEditorSafe}>
         <KeyboardAvoidingView
@@ -1579,6 +1582,7 @@ function StaffPickerModal({
                     )}
                     <View style={s.salonCardGrow}>
                       <Text style={s.cardTitle}>{member.name}</Text>
+                      {member.hairstyleMatch && <Text style={s.availableText}>Recommended · specialty matches your haircut</Text>}
                       <Text style={s.small}>
                         {member.specialties || "Salon professional"}
                       </Text>
@@ -1942,6 +1946,8 @@ export default function FaceFitPrototype() {
   const [selectedTime, setSelectedTime] = useState<string | null>(null);
   const [staffPickerVisible, setStaffPickerVisible] = useState(false);
   const [staffPickerLoading, setStaffPickerLoading] = useState(false);
+  const [bookedStylistId, setBookedStylistId] = useState<number | null>(null);
+  const staffAvailabilityRequest = useRef(0);
   const [lastBookingId, setLastBookingId] = useState<number | null>(null);
   const back = (fallback: Screen = "home") => setScreen(fallback);
   const requestLogout = (onConfirm: () => void) =>
@@ -2593,6 +2599,8 @@ export default function FaceFitPrototype() {
   const openSalon = async (
     salon: Salon,
     returnTo: "salons" | "nearby-map" | "saved-salons" | "reviews" = "salons",
+    preferredStylist?: SalonStaff,
+    preferredHairstyle?: string,
   ) => {
     const requestId = ++salonLoadRequestRef.current;
     setSalonDetailReturn(returnTo);
@@ -2605,6 +2613,8 @@ export default function FaceFitPrototype() {
     setSalonReviewSummary({ count: 0, average: 0 });
     setSelectedService(null);
     setSelectedStylist(null);
+    setBookedStylistId(preferredStylist?.id || null);
+    staffAvailabilityRequest.current++;
     setSelectedDate(null);
     setSelectedTime(null);
     setReviewRating(0);
@@ -2632,7 +2642,7 @@ export default function FaceFitPrototype() {
     if (requestId !== salonLoadRequestRef.current) return;
     if (servicesResult.status === "fulfilled") {
       setSalonServices(servicesResult.value);
-      if (selectedRecommendation) {
+      if (selectedRecommendation || preferredHairstyle) {
         const recommendedService =
           servicesResult.value.find(
             (service) => service.name === "Premium Style Haircut",
@@ -2644,7 +2654,10 @@ export default function FaceFitPrototype() {
         setSelectedService(recommendedService || null);
       }
     }
-    if (staffResult.status === "fulfilled") setSalonStaff(staffResult.value);
+    if (staffResult.status === "fulfilled") {
+      setSalonStaff(staffResult.value);
+      if (preferredStylist) setSelectedStylist(staffResult.value.find(member => member.id === preferredStylist.id) || null);
+    }
     if (portfolioResult.status === "fulfilled")
       setSalonPortfolioImages(portfolioResult.value);
     if (reviewsResult.status === "fulfilled") {
@@ -2667,6 +2680,14 @@ export default function FaceFitPrototype() {
       );
     }
     setSalonDetailLoading(false);
+    if (preferredStylist) {
+      const member = staffResult.status === 'fulfilled' && staffResult.value.find(item => item.id === preferredStylist.id);
+      const service = servicesResult.status === 'fulfilled' && (servicesResult.value.find(item => item.name === 'Premium Style Haircut') || servicesResult.value.find(item => /haircut|hair cut|\bcut\b/i.test(item.name)));
+      if (!member || !service) throw new Error('This stylist or haircut service is unavailable. Please choose another stylist.');
+      setSelectedService(service);
+      setSelectedStylist(member);
+      setScreen('datetime');
+    }
   };
 
   const submitSalonReview = async () => {
@@ -2805,6 +2826,8 @@ export default function FaceFitPrototype() {
       setScreen(
         result.user.role === "owner"
           ? "owner-dashboard"
+          : result.user.role === "stylist"
+            ? "stylist-dashboard"
           : hasAcceptedTerms
             ? "home"
             : "consent",
@@ -2866,6 +2889,13 @@ export default function FaceFitPrototype() {
         notes: selectedRecommendation
           ? `FaceFit suggested hairstyle: ${selectedRecommendation.name}`
           : undefined,
+        context: selectedRecommendation ? {
+          hairstyle: selectedRecommendation.name,
+          faceShape: faceAnalysis?.faceShape,
+          hairLength: hairScalpAnalysis?.hairLength || userProfile?.hairLength,
+          hairType: hairScalpAnalysis?.hairType || userProfile?.hairType,
+          referenceImage: hairstylePreviewImages[selectedRecommendation.name] || customSuggestionPreviewImages[selectedRecommendation.name] || null,
+        } : undefined,
       });
       setLastBookingId(booking.id);
       await loadBookings();
@@ -2934,9 +2964,10 @@ export default function FaceFitPrototype() {
 
   const chooseAppointmentTime = async (time: string) => {
     if (!selectedDate || !selectedSalon || !selectedService) return;
+    const request = ++staffAvailabilityRequest.current;
     setSelectedTime(time);
-    setSelectedStylist(null);
-    setStaffPickerVisible(true);
+    if (!bookedStylistId) setSelectedStylist(null);
+    setStaffPickerVisible(!bookedStylistId);
     setStaffPickerLoading(true);
     try {
       const availableStaff = await getSalonStaff(
@@ -2944,8 +2975,16 @@ export default function FaceFitPrototype() {
         `${selectedDate} ${time}:00`,
         selectedService.id,
       );
+      if (request !== staffAvailabilityRequest.current) return;
       setSalonStaff(availableStaff);
+      if (bookedStylistId) {
+        const member = availableStaff.find(item => item.id === bookedStylistId);
+        if (!member) { setSelectedTime(null); throw new Error('Your chosen stylist is unavailable at this time. Choose a different time or date.'); }
+        setSelectedStylist(member);
+      }
     } catch (error) {
+      if (request !== staffAvailabilityRequest.current) return;
+      setSelectedTime(null);
       setSalonStaff([]);
       Alert.alert(
         "Unable to check staff",
@@ -2954,7 +2993,7 @@ export default function FaceFitPrototype() {
           : "Unable to check staff availability.",
       );
     } finally {
-      setStaffPickerLoading(false);
+      if (request === staffAvailabilityRequest.current) setStaffPickerLoading(false);
     }
   };
 
@@ -3470,6 +3509,24 @@ export default function FaceFitPrototype() {
     (item) => item.audience === "men",
   );
   const matchSuggestions = (faceAnalysis?.recommendations || []).slice(0, 5);
+  const bookResultStylist = async (hairstyle: string, staff: SalonStaff & { salonId: number }) => {
+    if (!authToken || isGuestAccount) {
+      requireGuestLogin("Log in to book this hairstylist.");
+      return;
+    }
+    const recommendation = faceAnalysis?.recommendations.find(item => item.name === hairstyle)
+      || customHairstyleSuggestions.find(item => item.name === hairstyle);
+    setSelectedRecommendation(recommendation || null);
+    setSelectedSalonHairstyle(hairstyle);
+    try {
+      const salons = await getSalons();
+      const salon = salons.find(item => item.id === staff.salonId);
+      if (!salon) throw new Error('This salon is no longer available.');
+      await openSalon(salon, 'salons', staff, hairstyle);
+    } catch (error) {
+      Alert.alert('Unable to open salon', error instanceof Error ? error.message : 'Please try again.');
+    }
+  };
   const matchCardWidth = Math.min(Math.max(width - 48, 280), 560);
   useEffect(() => {
     setActiveHairstyleIndex(0);
@@ -3657,6 +3714,7 @@ export default function FaceFitPrototype() {
                         <Text style={[s.matchText, { fontSize: 11 }]}>{item.score}% match</Text>
                       </View>
                       <Text style={[s.small, { marginTop: 6 }]}>{item.reason}</Text>
+                      <HairstyleStylists hairstyle={item.name} onSelect={staff => void bookResultStylist(item.name, staff)} />
                       <Pressable accessibilityRole="button" onPress={() => { setSelectedRecommendation(item); setAiPreviewImage(preview || null); setScreen("style-detail"); }} style={{ marginTop: 16 }}>
                         <Text style={s.matchText}>View style details ›</Text>
                       </Pressable>
@@ -3754,6 +3812,9 @@ export default function FaceFitPrototype() {
                       </View>
                       <Text style={[s.small, { marginTop: 6 }]}>{item.reason}</Text>
                       <View style={{ flexDirection: "row", gap: 10, marginTop: 18 }}>
+                        <View style={{ flex: 1 }}><HairstyleStylists hairstyle={item.name} onSelect={staff => void bookResultStylist(item.name, staff)} /></View>
+                      </View>
+                      <View style={{ flexDirection: "row", gap: 10, marginTop: 18 }}>
                         <Pressable accessibilityRole="button" onPress={() => saveHairstyleForCustomer(item.name)} style={{ flex: 1, minHeight: 48, borderRadius: 15, backgroundColor: C.blush, borderWidth: 1, borderColor: C.line, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6 }}><Ionicons name="heart" size={17} color={C.roseDark} /><Text style={[s.matchText, { fontSize: 12 }]}>Save hairstyle</Text></Pressable>
                         <Pressable accessibilityRole="button" onPress={() => { if (!authToken) { setScreen("login"); return; } void findSalonsForStyle(item.name); }} style={{ flex: 1, minHeight: 48, borderRadius: 15, backgroundColor: C.rose, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6 }}><Ionicons name="location" size={17} color={C.white} /><Text style={{ color: C.white, fontSize: 12, fontWeight: "800" }}>Find salon</Text></Pressable>
                       </View>
@@ -3826,6 +3887,7 @@ export default function FaceFitPrototype() {
       </View>
       <Text style={s.sectionTitle}>Why it suits you</Text>
       <Text style={s.body}>{selectedRecommendation.reason}</Text>
+      <HairstyleStylists hairstyle={selectedRecommendation.name} onSelect={staff => void bookResultStylist(selectedRecommendation.name, staff)} />
       <Button
         label="Save hairstyle"
         onPress={() => saveHairstyleForCustomer(selectedRecommendation.name)}
@@ -4303,7 +4365,7 @@ export default function FaceFitPrototype() {
               <SectionTitle title="Available staff" />
               {salonStaff.length ? (
                 <View style={s.salonDetailGrid}>
-                  {salonStaff.map((staff) => {
+                  {rankStylists(salonStaff, selectedRecommendation?.name).map((staff) => {
                     const selected = selectedStylist?.id === staff.id;
                     return (
                       <Pressable
@@ -4341,6 +4403,7 @@ export default function FaceFitPrototype() {
                         )}
                         <View style={s.salonCardGrow}>
                           <Text style={s.cardTitle}>{staff.name}</Text>
+                          {staff.hairstyleMatch && <Text style={s.availableText}>Recommended · specialty matches your haircut</Text>}
                           <Text style={s.small}>
                             {staff.specialties || "Salon professional"}
                           </Text>
@@ -4763,6 +4826,7 @@ export default function FaceFitPrototype() {
         <View style={[s.progressFill, { width: "100%" }]} />
       </View>
       <Text style={s.body}>Step 2 of 2</Text>
+      {!!bookedStylistId && <View style={s.notice}><Text style={s.cardTitle}>{selectedStylist?.name || 'Your selected stylist'}</Text><Text style={s.small}>{selectedRecommendation?.name} · {selectedService?.name} · PHP {Number(selectedService?.price || 0).toLocaleString()} · {selectedService?.duration_minutes} min</Text><Text style={s.small}>Your stylist and haircut are selected. Choose your date and time below.</Text></View>}
       <View style={s.monthRow}>
         <Pressable
           disabled={
@@ -4821,7 +4885,9 @@ export default function FaceFitPrototype() {
               onPress={() => {
                 setSelectedDate(key);
                 setSelectedTime(null);
-                setSelectedStylist(null);
+                staffAvailabilityRequest.current++;
+                setStaffPickerLoading(false);
+                if (!bookedStylistId) setSelectedStylist(null);
               }}
               key={key}
               style={[s.day, active && s.dayActive]}
@@ -4839,7 +4905,7 @@ export default function FaceFitPrototype() {
           );
         })}
       </View>
-      {selectedSalon && <StaffSchedulePanel inline followSelectedDate salonId={selectedSalon.id} token={authToken} initialDate={selectedDate} />}
+      {selectedSalon && !bookedStylistId && <StaffSchedulePanel inline followSelectedDate salonId={selectedSalon.id} token={authToken} initialDate={selectedDate} />}
       <SectionTitle title="Available times" />
       <Text style={s.small}>Appointments follow salon opening hours. You can send a booking request even while the salon is closed.</Text>
       {!selectedDate && (
@@ -4886,6 +4952,7 @@ export default function FaceFitPrototype() {
       <Button
         label="Review booking"
         disabled={
+          staffPickerLoading ||
           !selectedService ||
           !selectedDate ||
           !selectedTime ||
@@ -4895,9 +4962,9 @@ export default function FaceFitPrototype() {
       />
     </ScreenFrame>
     <StaffPickerModal
-      visible={staffPickerVisible}
+      visible={staffPickerVisible && !bookedStylistId}
       loading={staffPickerLoading}
-      staff={salonStaff}
+      staff={rankStylists(salonStaff, selectedRecommendation?.name)}
       selectedId={selectedStylist?.id}
       dateLabel={selectedDateLabel}
       timeLabel={selectedTimeLabel}
@@ -6516,8 +6583,8 @@ export default function FaceFitPrototype() {
   else if (screen === "notifications") content = notificationPage(false);
   else if (screen === "reviews") content = accountPage("My reviews", "reviews");
   else if (screen === "settings") content = settingsPage;
-  else if (screen === "stylist-dashboard")
-    content = rolePage("stylist", "Stylist Dashboard");
+  else if (screen.startsWith("stylist-") && authToken && authUser?.role === "stylist")
+    content = <StylistDashboardScreen token={authToken} user={authUser} onLogout={() => requestLogout(() => { setAuthUser(null); setAuthToken(null); setScreen("login"); })}/>;
   else if (screen === "stylist-appointments")
     content = rolePage("stylist", "Appointments");
   else if (screen === "stylist-detail")

@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useRef, useState } from 'react';
+import { type ComponentRef, useRef, useState } from 'react';
 import {
   LayoutChangeEvent,
   NativeScrollEvent,
@@ -36,7 +36,7 @@ type OnboardingScreenProps = {
 export function OnboardingScreen({ onGetStarted, onLogin, onGuest }: OnboardingScreenProps) {
   const [activeSlide, setActiveSlide] = useState(0);
   const [pageWidth, setPageWidth] = useState(0);
-  const pager = useRef<ScrollView>(null);
+  const pager = useRef<ComponentRef<typeof ScrollView>>(null);
 
   const handleLayout = (event: LayoutChangeEvent) => {
     const nextWidth = event.nativeEvent.layout.width;

@@ -1,5 +1,8 @@
 const { depositAmount, validateSlot, validateProof, fail } = require('./services/booking-policy');
 async function ensureBookingSchema(pool) {
+  const [descriptionColumns] = await pool.execute("SHOW COLUMNS FROM stylists LIKE 'description'");
+  if (!descriptionColumns.length) await pool.execute('ALTER TABLE stylists ADD COLUMN description VARCHAR(500) NULL');
+  await require('./services/stylist-workspace').ensureStylistSchema(pool);
   // Appointment tracking also persists reminders across API restarts.
   await pool.execute(`CREATE TABLE IF NOT EXISTS booking_deposits (
     booking_id BIGINT UNSIGNED PRIMARY KEY, amount DECIMAL(10,2) NOT NULL,
@@ -40,6 +43,7 @@ function registerBookingRoutes(app, pool, authenticate) {
     return { booking: rows[0], salon: salons[0] };
   }
   async function checkConflict(db, booking, slot, salonId, includePending = false) {
+    await require('./services/stylist-workspace').checkStylistAvailability(db, booking.stylist_id, slot, booking.duration_minutes);
     const [conflicts] = await db.execute(`SELECT b.id FROM bookings b JOIN services sv ON sv.id=b.service_id
       WHERE sv.salon_id=? AND b.status IN (${includePending ? "'pending','confirmed'" : "'confirmed'"}) AND b.id<>? AND (b.stylist_id=? OR b.stylist_id IS NULL OR ? IS NULL)
       AND b.appointment_at < DATE_ADD(?, INTERVAL ? MINUTE)
@@ -55,6 +59,7 @@ function registerBookingRoutes(app, pool, authenticate) {
     if (typeof joinQueue !== 'boolean' || (joinQueue && !stylistId)) fail('Choose a stylist to join the waiting queue.');
     if (!Number.isInteger(serviceId) || (stylistId !== null && !Number.isInteger(stylistId))) fail('Choose a valid service and staff member.');
     if (notes !== null && (typeof notes !== 'string' || notes.length > 500)) fail('Notes must be under 500 characters.');
+    const context = require('./services/stylist-workspace').validateContext(req.body.context);
     const [rows] = await db.execute(`SELECT s.*, sv.price, sv.duration_minutes FROM salons s JOIN services sv ON sv.salon_id=s.id
       WHERE sv.id=? AND sv.is_active=TRUE AND sv.deleted_at IS NULL AND s.is_active=TRUE FOR UPDATE`, [serviceId]);
     const salon = rows[0]; if (!salon) fail('Service is no longer available.',404);
@@ -67,11 +72,16 @@ function registerBookingRoutes(app, pool, authenticate) {
     try { await checkConflict(db, { stylist_id: stylistId, duration_minutes: salon.duration_minutes }, appointmentAt, salon.id, true); }
     catch (error) { if (error.status !== 409 || !joinQueue) throw error; queued = true; }
     const [result] = await db.execute('INSERT INTO bookings (user_id,service_id,stylist_id,appointment_at,notes) VALUES (?,?,?,?,?)', [req.user.sub,serviceId,stylistId,appointmentAt,notes]);
+    if (context) await db.execute('INSERT INTO stylist_booking_details (booking_id,context) VALUES (?,?)', [result.insertId, JSON.stringify(context)]);
     if (queued) await db.execute('INSERT INTO booking_queue (booking_id) VALUES (?)',[result.insertId]);
     const amount = depositAmount(salon.price);
     await db.execute("INSERT INTO booking_deposits (booking_id,amount,status) VALUES (?,?,?)", [result.insertId,amount,amount === 0 ? 'verified' : 'unpaid']);
     await notify(db, req.user.sub,'Booking submitted',`${salon.name} received your request. Submit the 20% deposit for confirmation.`,'bookings',result.insertId);
     await notify(db,salon.owner_id,'New booking request','A customer submitted an appointment request.','owner-bookings',result.insertId);
+    if (stylistId) {
+      const [assigned] = await db.execute('SELECT user_id FROM stylists WHERE id=?', [stylistId]);
+      if (assigned[0]) await notify(db, assigned[0].user_id, 'New client appointment', `Booking #${result.insertId} was assigned to you. Awaiting salon confirmation.`, 'stylist-dashboard', result.insertId);
+    }
     if (queued) {
       await notify(db,req.user.sub,'Joined stylist queue',`Booking #${result.insertId}: your requested time is a waiting time, not a guaranteed start. The salon will confirm when the stylist is free.`,'bookings',result.insertId);
       await notify(db,salon.owner_id,'New waiting client',`Booking #${result.insertId} joined a stylist queue. Verify payment and confirm when the stylist becomes free.`,'owner-bookings',result.insertId);
@@ -107,6 +117,10 @@ function registerBookingRoutes(app, pool, authenticate) {
     await checkConflict(db,booking,req.body.appointmentAt,salon.id);
     await db.execute('INSERT INTO booking_changes (booking_id,requested_at,reason) VALUES (?,?,?)',[booking.id,req.body.appointmentAt,req.body.reason.trim()]);
     await notify(db,salon.owner_id,'Reschedule request','A customer requested a new appointment time.','owner-bookings',booking.id);
+    if (booking.stylist_id) {
+      const [assigned] = await db.execute('SELECT user_id FROM stylists WHERE id=?', [booking.stylist_id]);
+      if (assigned[0]) await notify(db, assigned[0].user_id, 'Reschedule request', `Your client requested a new schedule for booking #${booking.id}.`, 'stylist-dashboard', booking.id);
+    }
     return { status:'pending' };
   }));
   app.patch('/api/owner/bookings/:id/arrival', authenticate, route(async (req,db) => {
