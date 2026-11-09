@@ -136,9 +136,10 @@ function registerStylistWorkspaceRoutes(app, pool, authenticate) {
     try {
       const { rating, comment } = req.body;
       if (!Number.isInteger(rating) || rating < 1 || rating > 5 || typeof comment !== 'string' || comment.length > 1000) fail('Choose 1–5 stars and a comment under 1,000 characters.');
-      const [rows] = await pool.execute("SELECT id FROM bookings WHERE id=? AND user_id=? AND stylist_id IS NOT NULL AND status='completed'", [req.params.id, req.user.sub]);
+      const [rows] = await pool.execute("SELECT b.id,st.user_id AS stylistUserId,u.full_name AS customerName FROM bookings b JOIN stylists st ON st.id=b.stylist_id JOIN users u ON u.id=b.user_id WHERE b.id=? AND b.user_id=? AND b.stylist_id IS NOT NULL AND b.status='completed'", [req.params.id, req.user.sub]);
       if (!rows[0]) fail('Only your completed stylist appointments can be reviewed.', 403);
       await pool.execute('INSERT INTO stylist_reviews(booking_id,rating,comment) VALUES (?,?,?) ON DUPLICATE KEY UPDATE rating=VALUES(rating),comment=VALUES(comment)', [req.params.id, rating, comment.trim()]);
+      await pool.execute("INSERT INTO notifications(user_id,title,message,destination,reference_id) VALUES(?, 'New client feedback', ?, 'stylist-dashboard', ?) ON DUPLICATE KEY UPDATE id=id", [rows[0].stylistUserId, `${rows[0].customerName} left ${rating}-star feedback.`, req.params.id]);
       res.json({ data: { saved: true } });
     } catch (error) { if (error.status) res.status(error.status).json({ error: error.message }); else next(error); }
   });

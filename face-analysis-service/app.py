@@ -106,6 +106,31 @@ def classify(length_ratio, jaw_ratio, forehead_ratio):
     return "oval", 0.78
 
 
+def length_fit(name, reason, hair_length):
+    """Use the client's current length to rank practical next-step styles."""
+    value = (hair_length or "").strip().lower()
+    if not value or "unable to determine" in value or "not shared" in value:
+        return 0, reason
+    style = name.lower()
+    if any(term in value for term in ("short", "pixie", "cropped")):
+        fit = 7 if any(term in style for term in ("pixie", "crop", "crew", "fade", "caesar", "buzz")) else 0
+        fit -= 8 if any(term in style for term in ("long", "waist", "bro flow")) else 0
+    elif any(term in value for term in ("medium", "shoulder", "collarbone", "chin")):
+        fit = 6 if any(term in style for term in ("lob", "bob", "medium", "shoulder", "collarbone", "chin", "layer", "shag")) else 0
+        fit -= 5 if any(term in style for term in ("pixie", "buzz", "crew cut", "waist")) else 0
+    elif any(term in value for term in ("long", "waist", "mid-back", "mid back")):
+        fit = 7 if any(term in style for term in ("long", "waist", "bro flow", "butterfly", "ponytail", "updo")) else 0
+        fit -= 8 if any(term in style for term in ("pixie", "buzz", "crew cut", "caesar")) else 0
+    else:
+        return 0, reason
+    revised_reason = reason
+    if fit >= 6:
+        revised_reason = f"Works with your current {value} hair length. {reason}"
+    elif fit <= -5:
+        revised_reason = f"This style needs more length growth or a significant cut from your current {value} hair. {reason}"
+    return fit, revised_reason
+
+
 @app.get("/health")
 def health():
     return {"status": "ok"}
@@ -165,15 +190,16 @@ def analyze(payload: AnalysisRequest):
         audience = "women" if payload.stylePreference == "women" else "men"
         catalog = WOMEN_RECOMMENDATIONS if audience == "women" else MEN_RECOMMENDATIONS
         recommendation_catalog = [(*recommendation, audience) for recommendation in catalog[shape]]
-    suggestions = [
-        {
+    suggestions = []
+    for name, score, reason, audience in recommendation_catalog:
+        fit, fit_reason = length_fit(name, reason, payload.hairLength)
+        suggestions.append({
             "name": name,
-            "score": round(score * (0.88 + confidence * 0.12)),
-            "reason": reason,
+            "score": max(50, min(99, round(score * (0.88 + confidence * 0.12) + fit))),
+            "reason": fit_reason,
             "audience": audience,
-        }
-        for name, score, reason, audience in recommendation_catalog
-    ]
+        })
+    suggestions.sort(key=lambda item: item["score"], reverse=True)
     return {
         "faceShape": shape,
         "stylePreference": payload.stylePreference,

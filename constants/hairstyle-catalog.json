@@ -25,6 +25,31 @@
         "Long Soft Waves",
         84,
         "Adds movement while complementing balanced proportions."
+      ],
+      [
+        "Blunt Chin Bob",
+        81,
+        "A clean outline frames the face without changing its balanced proportions."
+      ],
+      [
+        "Shoulder-Length Blowout",
+        79,
+        "Soft volume and a versatile length complement balanced proportions."
+      ],
+      [
+        "Long Butterfly Layers",
+        77,
+        "Long movement frames the face while keeping length."
+      ],
+      [
+        "Sleek Low Bun",
+        75,
+        "A pulled-back option highlights balanced facial features."
+      ],
+      [
+        "Textured Collarbone Cut",
+        73,
+        "A relaxed mid-length shape adds movement and soft framing."
       ]
     ],
     "round": [
@@ -52,6 +77,31 @@
         "Long Side-Parted Waves",
         83,
         "A deep side part and length add angles to the outline."
+      ],
+      [
+        "Long Butterfly Cut",
+        81,
+        "Long layers add vertical movement around the cheeks."
+      ],
+      [
+        "Angled Chin Bob",
+        79,
+        "A forward angle adds definition around the jaw."
+      ],
+      [
+        "Long Curtain Fringe",
+        77,
+        "Longer fringe blends into face-framing lengths."
+      ],
+      [
+        "High Curly Ponytail",
+        75,
+        "Crown height and flowing length visually elongate the face."
+      ],
+      [
+        "Layered Mid-Length Cut",
+        73,
+        "Graduated layers add shape while keeping movement below the chin."
       ]
     ],
     "square": [
@@ -79,6 +129,31 @@
         "Long Feathered Layers",
         83,
         "Feathered movement softens the jaw's angular lines."
+      ],
+      [
+        "Long Curtain Layers",
+        81,
+        "Long curved framing softens strong angles."
+      ],
+      [
+        "Soft Jaw-Length Bob",
+        79,
+        "Rounded ends soften the jawline."
+      ],
+      [
+        "Loose Long Curls",
+        77,
+        "Curved texture balances a defined jaw."
+      ],
+      [
+        "Wispy Fringe with Layers",
+        75,
+        "Light fringe and movement soften angular features."
+      ],
+      [
+        "Long Face-Framing Waves",
+        73,
+        "Waves and soft layers add fluidity around the jaw."
       ]
     ],
     "heart": [
@@ -106,6 +181,31 @@
         "Wavy Chin-Length Cut",
         84,
         "Soft fullness near the jaw helps balance the forehead."
+      ],
+      [
+        "Long Side-Parted Layers",
+        81,
+        "Side movement balances the forehead while preserving length."
+      ],
+      [
+        "Jaw-Length French Bob",
+        79,
+        "Fullness near the jaw balances a narrower chin."
+      ],
+      [
+        "Long Soft Curtain Fringe",
+        77,
+        "A soft fringe frames the forehead and blends into longer layers."
+      ],
+      [
+        "Shoulder-Length Curls",
+        75,
+        "Side fullness and curls add balance near the jaw."
+      ],
+      [
+        "Low Loose Updo with Tendrils",
+        73,
+        "Loose face-framing pieces soften the forehead and chin contrast."
       ]
     ],
     "oblong": [
@@ -133,6 +233,31 @@
         "Full Fringe with Waves",
         84,
         "A fringe and side volume visually balance face length."
+      ],
+      [
+        "Chin-Length Curly Bob",
+        81,
+        "Side volume and a shorter silhouette balance face length."
+      ],
+      [
+        "Full Bangs with Shoulder Layers",
+        79,
+        "A full fringe visually shortens the face while layers add width."
+      ],
+      [
+        "Wide Wavy Lob",
+        77,
+        "Side volume adds width without emphasizing vertical length."
+      ],
+      [
+        "Side-Parted Medium Curls",
+        75,
+        "Curved side volume balances longer proportions."
+      ],
+      [
+        "Low Layered Shag",
+        73,
+        "A fringe and side texture soften the long outline."
       ]
     ],
     "diamond": [
@@ -160,6 +285,31 @@
         "Soft Wavy Lob",
         83,
         "Gentle waves add fullness around the narrower jaw."
+      ],
+      [
+        "Long Side-Parted Waves",
+        81,
+        "Soft fullness around the jaw balances prominent cheekbones."
+      ],
+      [
+        "Curly Chin Bob",
+        79,
+        "Jaw-level volume balances a narrower forehead and chin."
+      ],
+      [
+        "Wispy Curtain Fringe",
+        77,
+        "Light framing softens the forehead while showing cheekbones."
+      ],
+      [
+        "Shoulder-Length Blowout",
+        75,
+        "A soft silhouette balances the narrower upper and lower face."
+      ],
+      [
+        "Tucked Pixie with Side Fringe",
+        73,
+        "Side fringe softens the forehead and highlights cheekbones."
       ]
     ]
   },
@@ -189,6 +339,31 @@
         "Tapered Brush Up",
         84,
         "Adds texture and gentle height to balanced proportions."
+      ],
+      [
+        "Medium Layered Flow",
+        81,
+        "A versatile medium shape complements balanced proportions."
+      ],
+      [
+        "Low Taper with Natural Curls",
+        79,
+        "A neat taper keeps natural texture and balanced shape."
+      ],
+      [
+        "Long Textured Side Part",
+        77,
+        "Longer layers add movement without overpowering the face."
+      ],
+      [
+        "Curly Fringe Taper",
+        75,
+        "Texture frames the forehead while keeping the sides controlled."
+      ],
+      [
+        "Classic Scissor Cut",
+        73,
+        "A tailored natural finish follows balanced proportions."
       ]
     ],
     "round": [
@@ -216,6 +391,31 @@
         "Slick Side Sweep",
         84,
         "A defined part adds angles and lengthens the silhouette."
+      ],
+      [
+        "Low Taper with Side Part",
+        81,
+        "A side part adds angles while keeping height controlled."
+      ],
+      [
+        "Long Textured Quiff",
+        79,
+        "Controlled height and tapered sides add definition."
+      ],
+      [
+        "Side-Swept Medium Layers",
+        77,
+        "Diagonal texture creates a more angular outline."
+      ],
+      [
+        "Curly High Top Fade",
+        75,
+        "Defined side contrast and top volume visually lengthen the face."
+      ],
+      [
+        "Angular Long Fringe",
+        73,
+        "An angled fringe breaks up rounded proportions."
       ]
     ],
     "square": [
@@ -243,6 +443,31 @@
         "Soft Taper with Texture",
         84,
         "Soft movement balances the strong lines of the face."
+      ],
+      [
+        "Medium Scissor Taper",
+        81,
+        "Soft scissor work balances the strong jawline."
+      ],
+      [
+        "Long Textured Side Part",
+        79,
+        "Longer movement softens the angular outline."
+      ],
+      [
+        "Curly Tapered Fringe",
+        77,
+        "Natural curls soften the forehead and jaw."
+      ],
+      [
+        "Classic Ivy League",
+        75,
+        "A neat, adaptable shape complements strong features."
+      ],
+      [
+        "Soft Medium Bro Flow",
+        73,
+        "Longer side movement softens square proportions."
       ]
     ],
     "heart": [
@@ -270,6 +495,31 @@
         "Classic Taper with Side Fringe",
         84,
         "A soft fringe balances the forehead and narrower chin."
+      ],
+      [
+        "Medium Curly Bro Flow",
+        81,
+        "Fullness near the temples and jaw helps balance the forehead."
+      ],
+      [
+        "Textured Long Fringe",
+        79,
+        "A forward fringe softens a broad forehead."
+      ],
+      [
+        "Low Taper with Medium Top",
+        77,
+        "A low taper preserves side fullness near the narrower chin."
+      ],
+      [
+        "Wavy Side-Swept Layers",
+        75,
+        "Diagonal movement balances the forehead and chin."
+      ],
+      [
+        "Classic Medium Scissor Cut",
+        73,
+        "Natural side fullness adds balance to a narrower lower face."
       ]
     ],
     "oblong": [
@@ -297,6 +547,31 @@
         "Wavy Side Part",
         84,
         "Side volume creates width while keeping the crown low."
+      ],
+      [
+        "Textured Crop with Fringe",
+        81,
+        "A forward fringe visually shortens longer proportions."
+      ],
+      [
+        "Medium Curly Taper",
+        79,
+        "Side fullness adds width while keeping crown height controlled."
+      ],
+      [
+        "Classic Side-Part Scissor Cut",
+        77,
+        "A low profile and fuller sides balance face length."
+      ],
+      [
+        "Short Caesar with Texture",
+        75,
+        "A compact fringe reduces the appearance of length."
+      ],
+      [
+        "Wavy Medium Fringe",
+        73,
+        "Horizontal wave and fringe add width across the face."
       ]
     ],
     "diamond": [
@@ -324,6 +599,31 @@
         "Low Taper with Side Sweep",
         84,
         "A soft side sweep adds balance around the temples."
+      ],
+      [
+        "Medium Side-Swept Fringe",
+        81,
+        "Side fullness balances a narrower forehead and jaw."
+      ],
+      [
+        "Classic Scissor Taper",
+        79,
+        "Soft side volume complements defined cheekbones."
+      ],
+      [
+        "Curly Medium Crop",
+        77,
+        "Natural texture adds fullness around the temples."
+      ],
+      [
+        "Long Layered Side Part",
+        75,
+        "Longer side movement softens prominent cheekbones."
+      ],
+      [
+        "Low Taper with Wavy Fringe",
+        73,
+        "A soft fringe balances the narrower forehead."
       ]
     ]
   }

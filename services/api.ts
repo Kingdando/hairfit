@@ -38,6 +38,9 @@ export type SalonStaff = {
   specialties: string | null;
   isAvailable: boolean;
   imageUrl: string | null;
+  reviewCount?: number;
+  averageRating?: number;
+  reviews?: { rating: number; comment: string | null; customerName: string; createdAt: string }[];
 };
 export type RecommendedStylist = SalonStaff & { salonId: number; salonName: string };
 export async function getRecommendedStylists() {
@@ -141,6 +144,8 @@ export type BookingExtras = {
   changeRequestId: number | null;
   requestedAppointmentAt: string | null;
   changeReason: string | null;
+  stylistReviewRating?: number | null;
+  stylistReviewComment?: string | null;
 };
 export type Booking = BookingExtras & {
   id: number;
@@ -342,11 +347,11 @@ export async function updateProfile(token: string, input: { fullName: string; em
   return (result as { data: UserProfile }).data;
 }
 
-export async function analyzeFace(token: string | null, imageData: string, stylePreference: 'men' | 'women' = 'men') {
+export async function analyzeFace(token: string | null, imageData: string, stylePreference: 'men' | 'women' = 'men', hairLength?: string | null) {
   const response = await fetchApi('/api/face-analysis', {
     method: 'POST',
     headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), 'Content-Type': 'application/json' },
-    body: JSON.stringify({ imageData, stylePreference }),
+    body: JSON.stringify({ imageData, stylePreference, ...(hairLength ? { hairLength } : {}) }),
   });
   const result = await response.json().catch(() => null);
   if (!response.ok) throw new Error(result?.error || `Face analysis failed (${response.status})`);
@@ -359,14 +364,13 @@ export async function analyzeFace(token: string | null, imageData: string, style
     item && typeof item.name === 'string' && item.name.trim() &&
     typeof item.reason === 'string' && Number.isFinite(item.score));
   for (const [name, score, reason] of catalog) {
-    if (matches.length >= 5) break;
     if (matches.some((item) => item.name === name)) continue;
     matches.push({
       name: String(name), reason: String(reason), audience,
       score: Math.round(Number(score) * (0.88 + Math.max(0, Math.min(1, Number(analysis.confidence) || 0)) * 0.12)),
     });
   }
-  return { ...analysis, recommendations: matches.slice(0, 5) };
+  return { ...analysis, recommendations: matches };
 }
 
 export async function getOwnerDashboard(token: string) {

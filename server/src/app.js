@@ -248,7 +248,7 @@ app.post('/api/face-analysis', authenticateOptional, async (request, response, n
     const aiResponse = await fetch(`${analysisUrl}/analyze`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ imageData, ...(profiles[0] || {}), stylePreference: requestedStylePreference }),
+      body: JSON.stringify({ imageData, ...(profiles[0] || {}), hairLength: optionalText(request.body.hairLength, 50) || profiles[0]?.hairLength || null, stylePreference: requestedStylePreference }),
       signal: AbortSignal.timeout(30000),
     });
     const analysis = await aiResponse.json().catch(() => null);
@@ -1071,6 +1071,8 @@ app.get('/api/salons/:salonId/staff', async (request, response, next) => {
     }
     const [staff] = await pool.execute(
       `SELECT st.id,u.full_name AS name,st.specialties,st.is_available AS isAvailable,st.image_path AS imageUrl,
+       COALESCE((SELECT ROUND(AVG(sr.rating),1) FROM stylist_reviews sr JOIN bookings rb ON rb.id=sr.booking_id WHERE rb.stylist_id=st.id),0) AS averageRating,
+       (SELECT COUNT(*) FROM stylist_reviews sr JOIN bookings rb ON rb.id=sr.booking_id WHERE rb.stylist_id=st.id) AS reviewCount,
        ${hasSlot ? `EXISTS (SELECT 1 FROM bookings b JOIN services sv ON sv.id=b.service_id
          JOIN services requested ON requested.id=?
          LEFT JOIN booking_queue q ON q.booking_id=b.id
@@ -1080,15 +1082,29 @@ app.get('/api/salons/:salonId/staff', async (request, response, next) => {
        FROM stylists st JOIN users u ON u.id=st.user_id
        WHERE st.salon_id=? AND st.is_available=TRUE AND st.deleted_at IS NULL ORDER BY u.full_name`,
       hasSlot ? [Number(serviceId),appointmentAt,appointmentAt,request.params.salonId] : [request.params.salonId]);
+    const [reviewRows] = await pool.execute(
+      `SELECT b.stylist_id AS stylistId,sr.rating,sr.comment,u.full_name AS customerName,sr.created_at AS createdAt
+       FROM stylist_reviews sr JOIN bookings b ON b.id=sr.booking_id JOIN users u ON u.id=b.user_id
+       JOIN stylists st ON st.id=b.stylist_id WHERE st.salon_id=? AND st.is_available=TRUE AND st.deleted_at IS NULL
+       ORDER BY sr.created_at DESC`,
+      [request.params.salonId],
+    );
+    const reviewsByStylist = new Map();
+    for (const review of reviewRows) {
+      const reviews = reviewsByStylist.get(Number(review.stylistId)) || [];
+      reviews.push({ rating: Number(review.rating), comment: review.comment, customerName: review.customerName, createdAt: review.createdAt });
+      reviewsByStylist.set(Number(review.stylistId), reviews);
+    }
+    const staffWithReviews = staff.map(member => ({ ...member, reviews: reviewsByStylist.get(Number(member.id)) || [] }));
     if (hasSlot) {
       const [settings] = await pool.execute(`SELECT st.id,ss.settings,sv.duration_minutes FROM stylists st
         JOIN services sv ON sv.salon_id=st.salon_id LEFT JOIN stylist_settings ss ON ss.stylist_id=st.id
         WHERE st.salon_id=? AND sv.id=? AND sv.is_active=TRUE AND sv.deleted_at IS NULL`, [request.params.salonId, Number(serviceId)]);
       const { parse, allowsSlot } = require('./services/stylist-workspace');
       const available = new Set(settings.filter(row => allowsSlot(parse(row.settings), String(appointmentAt), row.duration_minutes)).map(row => Number(row.id)));
-      return response.json({ data: staff.filter(member => available.has(Number(member.id))) });
+      return response.json({ data: staffWithReviews.filter(member => available.has(Number(member.id))) });
     }
-    response.json({ data: staff });
+    response.json({ data: staffWithReviews });
   } catch (error) {
     next(error);
   }
@@ -1238,6 +1254,7 @@ app.get('/api/bookings', authenticate, async (request, response, next) => {
        JOIN salons sa ON sa.id = sv.salon_id
        LEFT JOIN stylists st ON st.id = b.stylist_id
        LEFT JOIN users u ON u.id = st.user_id
+       LEFT JOIN stylist_reviews sr ON sr.booking_id = b.id
        WHERE b.user_id = ?
        ORDER BY b.appointment_at DESC`,
       [request.user.sub],

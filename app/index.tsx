@@ -51,6 +51,7 @@ import {
   markNotificationRead,
   removeOwnerPortfolioImage,
   removeOwnerReviewReply,
+  reviewStylist,
   removeOwnerService,
   removeOwnerStaff,
   saveHairstyle,
@@ -743,8 +744,8 @@ function TabBar({ screen, go }: { screen: Screen; go: (x: Screen) => void }) {
     icon: keyof typeof Ionicons.glyphMap;
   }[] = [
     { key: "home", label: "Home", icon: "home-outline" },
-    { key: "scan", label: "Scan", icon: "scan-outline" },
     { key: "salons", label: "Salons", icon: "storefront-outline" },
+    { key: "scan", label: "Scan", icon: "scan-outline" },
     { key: "bookings", label: "Bookings", icon: "calendar-outline" },
     { key: "profile", label: "Profile", icon: "person-outline" },
   ];
@@ -762,20 +763,9 @@ function TabBar({ screen, go }: { screen: Screen; go: (x: Screen) => void }) {
             ].includes(screen)) ||
           (t.key === "profile" && screen === "settings");
         return (
-          <Pressable key={t.key} onPress={() => go(t.key)} style={s.tabItem}>
-            <Ionicons
-              name={
-                active
-                  ? (t.icon.replace(
-                      "-outline",
-                      "",
-                    ) as keyof typeof Ionicons.glyphMap)
-                  : t.icon
-              }
-              size={22}
-              color={active ? C.rose : C.muted}
-            />
-            <Text style={[s.tabLabel, active && s.tabActive]}>{t.label}</Text>
+          <Pressable key={t.key} accessibilityRole="button" accessibilityLabel={t.key === 'scan' ? 'AI face scan' : t.label} onPress={() => go(t.key)} style={[s.tabItem, t.key === 'scan' && s.scanTabItem]}>
+            {t.key === 'scan' ? <View style={[s.scanTabButton, active && s.scanTabButtonActive]}><Ionicons name="sparkles" size={12} color="#E4F1E3" style={s.scanSparkleOne}/><Ionicons name={active ? 'scan' : 'scan-outline'} size={27} color={C.white}/><Ionicons name="sparkles" size={10} color="#E4F1E3" style={s.scanSparkleTwo}/></View> : <Ionicons name={active ? (t.icon.replace('-outline', '') as keyof typeof Ionicons.glyphMap) : t.icon} size={22} color={active ? C.rose : C.muted}/>}
+            <Text style={[s.tabLabel, active && s.tabActive, t.key === 'scan' && s.scanTabLabel]}>{t.key === 'scan' ? 'AI Scan' : t.label}</Text>
           </Pressable>
         );
       })}
@@ -1828,6 +1818,7 @@ export default function FaceFitPrototype() {
   const [serviceCategoryFilter, setServiceCategoryFilter] = useState<ServiceCategory>('All');
   const [ownerServiceCategoryFilter, setOwnerServiceCategoryFilter] = useState<ServiceCategory>('All');
   const [salonStaff, setSalonStaff] = useState<SalonStaff[]>([]);
+  const [salonDetailTab, setSalonDetailTab] = useState<'Services' | 'Staff' | 'Reviews'>('Services');
   const [salonPortfolioImages, setSalonPortfolioImages] = useState<
     PortfolioImage[]
   >([]);
@@ -1927,6 +1918,7 @@ export default function FaceFitPrototype() {
   const [selectedStylist, setSelectedStylist] = useState<SalonStaff | null>(
     null,
   );
+  const [quickProfileStylist, setQuickProfileStylist] = useState<SalonStaff | null>(null);
   const [reviewRating, setReviewRating] = useState(0);
   const [reviewComment, setReviewComment] = useState("");
   const [reviewImageData, setReviewImageData] = useState<
@@ -1936,6 +1928,8 @@ export default function FaceFitPrototype() {
   const [mySalonReviewIds, setMySalonReviewIds] = useState<number[]>([]);
   const [editingReviewId, setEditingReviewId] = useState<number | null>(null);
   const [reviewSaving, setReviewSaving] = useState(false);
+  const [stylistReviewDrafts, setStylistReviewDrafts] = useState<Record<number, { rating: number; comment: string }>>({});
+  const [stylistReviewSavingId, setStylistReviewSavingId] = useState<number | null>(null);
   const [bookingLoading, setBookingLoading] = useState(false);
   const [bookingError, setBookingError] = useState<string | null>(null);
   const [calendarMonth, setCalendarMonth] = useState(() => {
@@ -2067,6 +2061,21 @@ export default function FaceFitPrototype() {
       setBookingsLoading(false);
     }
   }, [authToken]);
+  const submitStylistFeedback = async (booking: Booking) => {
+    if (!authToken) return;
+    const draft = stylistReviewDrafts[booking.id];
+    if (!draft?.rating || stylistReviewSavingId !== null) return;
+    setStylistReviewSavingId(booking.id);
+    try {
+      await reviewStylist(authToken, booking.id, draft.rating, draft.comment);
+      setBookingRecords(current => current.map(item => item.id === booking.id ? { ...item, stylistReviewRating: draft.rating, stylistReviewComment: draft.comment } : item));
+      setStylistReviewDrafts(current => { const next = { ...current }; delete next[booking.id]; return next; });
+    } catch (error) {
+      Alert.alert('Could not send feedback', error instanceof Error ? error.message : 'Please try again.');
+    } finally {
+      setStylistReviewSavingId(null);
+    }
+  };
   useEffect(() => {
     if (screen === "bookings") void loadBookings();
   }, [loadBookings, screen]);
@@ -2602,6 +2611,7 @@ export default function FaceFitPrototype() {
     preferredStylist?: SalonStaff,
     preferredHairstyle?: string,
   ) => {
+    setSalonDetailTab('Services');
     const requestId = ++salonLoadRequestRef.current;
     setSalonDetailReturn(returnTo);
     setSelectedSalon(salon);
@@ -3096,7 +3106,7 @@ export default function FaceFitPrototype() {
     setScreen("processing");
     try {
       const [analysis] = await Promise.all([
-        analyzeFace(isGuestAccount ? null : authToken, imageData, stylePreference),
+        analyzeFace(isGuestAccount ? null : authToken, imageData, stylePreference, hairScalpAnalysis?.hairLength || userProfile?.hairLength),
         new Promise((resolve) => setTimeout(resolve, 1800)),
       ]);
       setFaceAnalysis(analysis);
@@ -3661,7 +3671,7 @@ export default function FaceFitPrototype() {
       </Modal>
       <View style={s.resultMatchesHeader}>
         <View style={s.resultMatchesIcon}><Ionicons name="sparkles" size={22} color={C.rose} /></View>
-        <View style={s.salonCardGrow}><Text style={s.sectionTitle}>Your hairstyle matches</Text><Text style={s.small}>Ranked for your {faceAnalysis.faceShape} face and detected proportions.</Text></View>
+        <View style={s.salonCardGrow}><Text style={s.sectionTitle}>Your hairstyle matches</Text><Text style={s.small}>Ranked for your {faceAnalysis.faceShape} face, detected proportions, and {hairScalpAnalysis?.hairLength || userProfile?.hairLength || "preferred"} hair length.</Text></View>
       </View>
       {matchSuggestions.length > 0 ? (
         <>
@@ -3849,7 +3859,7 @@ export default function FaceFitPrototype() {
     <ScreenFrame>
       <Header title="Men's top matches" onBack={() => setScreen("result")} action="heart-outline" />
       <Text style={s.body}>
-        Men&apos;s hairstyles ranked for your {faceAnalysis?.faceShape || "detected"} face shape and facial proportions.
+        Men&apos;s hairstyles ranked for your {faceAnalysis?.faceShape || "detected"} face shape, facial proportions, and hair length.
       </Text>
       <View style={s.chatBox}>
         <Ionicons name="sparkles" size={19} color={C.rose} />
@@ -4240,7 +4250,7 @@ export default function FaceFitPrototype() {
             <ActivityIndicator color={C.rose} style={s.dataLoader} />
           ) : (
             <>
-              {salonPortfolioImages.length > 0 && (
+              {salonDetailTab === 'Services' && salonPortfolioImages.length > 0 && (
                 <>
                   <SectionTitle title="Business portfolio" />
                   <ScrollView
@@ -4264,7 +4274,7 @@ export default function FaceFitPrototype() {
                   </ScrollView>
                 </>
               )}
-              <SectionTitle title="Services & pricing" />
+              {salonDetailTab === 'Services' && <><SectionTitle title="Services & pricing" />
               {selectedRecommendation && suggestedStyleService && (
                 <Pressable
                   onPress={() => {
@@ -4307,7 +4317,7 @@ export default function FaceFitPrototype() {
                   />
                 </Pressable>
               )}
-              <ServiceCategoryFilters services={salonServices} value={serviceCategoryFilter} onChange={setServiceCategoryFilter} />
+              {salonDetailTab === 'Services' && <ServiceCategoryFilters services={salonServices} value={serviceCategoryFilter} onChange={setServiceCategoryFilter} />}
               {salonServices.length ? (
                 <View style={s.salonDetailGrid}>
                   {!salonServices.some(service => matchesServiceCategory(service, serviceCategoryFilter)) && <Text style={s.small}>No services in this category.</Text>}
@@ -4360,9 +4370,9 @@ export default function FaceFitPrototype() {
                     </Text>
                   </View>
                 </View>
-              )}
+              )}</>}
 
-              <SectionTitle title="Available staff" />
+              {salonDetailTab === 'Staff' && <><SectionTitle title="Available staff" />
               {salonStaff.length ? (
                 <View style={s.salonDetailGrid}>
                   {rankStylists(salonStaff, selectedRecommendation?.name).map((staff) => {
@@ -4401,7 +4411,7 @@ export default function FaceFitPrototype() {
                             </Text>
                           </View>
                         )}
-                        <View style={s.salonCardGrow}>
+                        <Pressable accessibilityRole="button" accessibilityLabel={`View ${staff.name}'s profile and client feedback`} onPress={() => setQuickProfileStylist(staff)} style={s.salonCardGrow}>
                           <Text style={s.cardTitle}>{staff.name}</Text>
                           {staff.hairstyleMatch && <Text style={s.availableText}>Recommended · specialty matches your haircut</Text>}
                           <Text style={s.small}>
@@ -4411,7 +4421,8 @@ export default function FaceFitPrototype() {
                             <View style={s.availableDot} />
                             <Text style={s.availableText}>Available</Text>
                           </View>
-                        </View>
+                          <Text style={[s.availableText, { marginTop: 7 }]}>View profile & feedback</Text>
+                        </Pressable>
                         <Ionicons
                           name={
                             selected ? "checkmark-circle" : "add-circle-outline"
@@ -4436,9 +4447,9 @@ export default function FaceFitPrototype() {
                     </Text>
                   </View>
                 </View>
-              )}
+              )}</>}
 
-              <View style={s.reviewHeading}>
+              {salonDetailTab === 'Reviews' && <><View style={s.reviewHeading}>
                 <SectionTitle title="Customer reviews" />
                 <View style={s.reviewSummaryPill}>
                   <Ionicons name="star" size={15} color={C.gold} />
@@ -4565,7 +4576,7 @@ export default function FaceFitPrototype() {
                     </Text>
                   </View>
                 </View>
-              )}
+              )}</>}
 
               {authToken ? (
                 <View style={s.reviewComposer}>
@@ -5140,6 +5151,17 @@ export default function FaceFitPrototype() {
               <Text style={s.chipText}>{booking.durationMinutes} min</Text>
               <Text style={s.bookingStatus}>{booking.status}</Text>
             </View>
+            {booking.status === 'completed' && booking.stylistName && <View style={[s.stylistFeedbackCard, !!booking.stylistReviewRating && s.stylistFeedbackSent]}>
+              {!!booking.stylistReviewRating ? <>
+                <View style={s.stylistFeedbackHeader}><View style={s.stylistFeedbackIcon}><Ionicons name="checkmark" size={20} color={C.white}/></View><View style={{ flex: 1 }}><Text style={s.stylistFeedbackTitle}>Feedback sent</Text><Text style={s.stylistFeedbackSub}>Thanks for sharing your experience with {booking.stylistName}.</Text></View><Ionicons name="sparkles" size={21} color={C.gold}/></View>
+              </> : <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}><View style={s.stylistFeedbackIconPending}><Ionicons name="star" size={18} color={C.rose}/></View><View style={{ flex: 1 }}><Text style={s.stylistFeedbackTitle}>Share stylist feedback</Text><Text style={s.stylistFeedbackSub}>How was your experience with {booking.stylistName}?</Text></View></View>}
+              {!booking.stylistReviewRating && <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
+                {[1, 2, 3, 4, 5].map(star => <Pressable key={star} accessibilityRole="button" accessibilityLabel={`${star} star${star === 1 ? '' : 's'}`} accessibilityState={{ selected: (stylistReviewDrafts[booking.id]?.rating ?? booking.stylistReviewRating ?? 0) >= star }} onPress={() => setStylistReviewDrafts(current => ({ ...current, [booking.id]: { rating: star, comment: current[booking.id]?.comment ?? booking.stylistReviewComment ?? '' } }))} style={{ padding: 4 }}><Ionicons name={(stylistReviewDrafts[booking.id]?.rating ?? booking.stylistReviewRating ?? 0) >= star ? 'star' : 'star-outline'} size={25} color={C.gold}/></Pressable>)}
+              </View>}
+              {!booking.stylistReviewRating && <TextInput accessibilityLabel="Feedback for stylist" value={stylistReviewDrafts[booking.id]?.comment ?? ''} onChangeText={value => setStylistReviewDrafts(current => ({ ...current, [booking.id]: { rating: current[booking.id]?.rating ?? 0, comment: value } }))} placeholder="Write a few words about your visit…" placeholderTextColor={C.muted} multiline maxLength={1000} style={s.stylistFeedbackInput}/>}
+              {!booking.stylistReviewRating && <Button label={stylistReviewSavingId === booking.id ? 'Sending…' : 'Send stylist feedback'} onPress={() => void submitStylistFeedback(booking)} disabled={stylistReviewSavingId !== null || !(stylistReviewDrafts[booking.id]?.rating ?? booking.stylistReviewRating)} icon="send-outline"/>}
+              {!!booking.stylistReviewRating && <View style={s.stylistFeedbackQuote}><View style={s.stylistFeedbackQuoteTop}><Text style={s.stylistFeedbackStars}>{'★'.repeat(booking.stylistReviewRating)}{'☆'.repeat(5 - booking.stylistReviewRating)}</Text><Text style={s.stylistFeedbackYourRating}>YOUR RATING</Text></View><Text style={s.stylistFeedbackQuoteText}>{booking.stylistReviewComment ? `“${booking.stylistReviewComment}”` : 'Thank you for sharing your rating.'}</Text></View>}
+            </View>}
             {authToken && <BookingActions booking={booking} token={authToken} onUpdated={loadBookings}
               chooseReceipt={() => chooseImage("your payment receipt", false)}
               onRebook={() => {
@@ -6631,6 +6653,17 @@ export default function FaceFitPrototype() {
         )}
         <View style={s.contentViewport}>{content}</View>
       </View>
+      {!isDesktopWeb && screen === 'salon-detail' && selectedSalon && !salonDetailLoading && (
+        <SafeAreaView edges={['bottom']} style={s.salonSectionFooter}>
+          <View style={s.salonSectionTabs} accessibilityRole="tablist">
+            {([
+              { name: 'Services' as const, count: salonServices.length, icon: 'cut-outline' as const },
+              { name: 'Staff' as const, count: salonStaff.length, icon: 'people-outline' as const },
+              { name: 'Reviews' as const, count: salonReviewSummary.count, icon: 'star-outline' as const },
+            ]).map(tab => <Pressable key={tab.name} accessibilityRole="tab" accessibilityState={{ selected: salonDetailTab === tab.name }} onPress={() => setSalonDetailTab(tab.name)} style={[s.salonSectionTab, salonDetailTab === tab.name && s.salonSectionTabActive]}><Ionicons name={tab.icon} size={17} color={salonDetailTab === tab.name ? C.white : C.rose}/><Text style={[s.salonSectionTabText, salonDetailTab === tab.name && s.salonSectionTabTextActive]}>{tab.name}</Text><Text style={[s.salonSectionTabCount, salonDetailTab === tab.name && s.salonSectionTabTextActive]}>{tab.count}</Text></Pressable>)}
+          </View>
+        </SafeAreaView>
+      )}
       {!isDesktopWeb &&
         (mainScreens.includes(screen) || screen === "settings") &&
         ![
@@ -6685,6 +6718,19 @@ export default function FaceFitPrototype() {
             />
           )}
         </SafeAreaView>
+      </Modal>
+      <Modal transparent animationType="slide" visible={!!quickProfileStylist} onRequestClose={() => setQuickProfileStylist(null)}>
+        <Pressable style={s.staffModalBackdrop} onPress={() => setQuickProfileStylist(null)}>
+          <Pressable style={[s.staffModalSheet, { maxHeight: '82%' }]} onPress={event => event.stopPropagation()}>
+            <View style={s.staffModalHandle}/>
+            <View style={s.staffModalHeader}><View style={s.salonCardGrow}><Text style={s.eyebrow}>STYLIST PROFILE</Text><Text style={s.title}>{quickProfileStylist?.name}</Text><Text style={s.small}>{quickProfileStylist?.specialties || 'Salon professional'}</Text></View><Pressable accessibilityRole="button" accessibilityLabel="Close stylist profile" onPress={() => setQuickProfileStylist(null)} style={s.iconButton}><Ionicons name="close" size={22} color={C.ink}/></Pressable></View>
+            <ScrollView contentContainerStyle={{ padding: 20, gap: 14 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14, padding: 16, borderRadius: 18, backgroundColor: C.blush }}><View style={s.staffModalAvatarFallback}><Text style={s.staffInitial}>{quickProfileStylist?.name.charAt(0).toUpperCase()}</Text></View><View style={{ flex: 1 }}><Text style={s.cardTitle}>{quickProfileStylist?.name}</Text><Text style={s.small}>{quickProfileStylist?.specialties || 'Experienced salon stylist'}</Text></View><View style={{ alignItems: 'center' }}><Text style={{ fontSize: 20, fontWeight: '800', color: C.roseDark }}>{Number(quickProfileStylist?.averageRating || 0).toFixed(1)} ★</Text><Text style={s.small}>{quickProfileStylist?.reviewCount || 0} reviews</Text></View></View>
+              <Text style={s.sectionTitle}>Client feedback</Text>
+              {quickProfileStylist?.reviews?.length ? quickProfileStylist.reviews.map((review, index) => <View key={`${index}-${review.createdAt}`} style={{ padding: 15, backgroundColor: C.white, borderWidth: 1, borderColor: C.line, borderRadius: 16, gap: 7 }}><Text style={{ color: C.gold, fontSize: 13, letterSpacing: 2 }}>{'★'.repeat(Number(review.rating))}{'☆'.repeat(5 - Number(review.rating))}</Text><Text style={s.cardTitle}>{review.customerName}</Text>{review.comment ? <Text style={s.body}>{review.comment}</Text> : <Text style={s.small}>No written comment.</Text>}<Text style={s.small}>{new Date(review.createdAt).toLocaleDateString()}</Text></View>) : <View style={{ alignItems: 'center', padding: 24, borderRadius: 16, backgroundColor: C.white, gap: 8 }}><Ionicons name="chatbubble-ellipses-outline" size={28} color={C.rose}/><Text style={s.cardTitle}>No stylist reviews yet</Text><Text style={[s.small, { textAlign: 'center' }]}>Client feedback will appear here after completed appointments.</Text></View>}
+            </ScrollView>
+          </Pressable>
+        </Pressable>
       </Modal>
       <OwnerEditorModal
         editor={ownerEditor}
@@ -7329,11 +7375,18 @@ const s = StyleSheet.create({
     borderWidth: 1,
     borderColor: C.line,
     flexDirection: "row",
+    alignItems: "center",
     boxShadow: [{ offsetX: 0, offsetY: 5, blurRadius: 18, color: "rgba(53, 92, 69, 0.1)" }],
     elevation: 8,
   },
   tabBarWeb: { maxWidth: "100%" },
-  tabItem: { flex: 1, alignItems: "center", justifyContent: "center", gap: 4 },
+  tabItem: { flex: 1, height: "100%", alignItems: "center", justifyContent: "center", gap: 4 },
+  scanTabItem: { justifyContent: "center", gap: 0 },
+  scanTabButton: { width: 56, height: 56, marginTop: -20, marginBottom: 2, borderRadius: 19, backgroundColor: C.rose, borderWidth: 3, borderColor: C.white, alignItems: "center", justifyContent: "center", boxShadow: [{ offsetX: 0, offsetY: 4, blurRadius: 12, color: "rgba(53, 92, 69, 0.3)" }], elevation: 9 },
+  scanTabButtonActive: { backgroundColor: C.roseDark },
+  scanSparkleOne: { position: "absolute", top: 7, right: 9 },
+  scanSparkleTwo: { position: "absolute", bottom: 8, left: 9 },
+  scanTabLabel: { marginTop: 2, color: C.roseDark, fontWeight: "800" },
   tabLabel: { fontSize: 10, fontWeight: "700", color: C.muted },
   tabActive: { color: C.rose, fontWeight: "800" },
   centerPage: {
@@ -7855,6 +7908,26 @@ const s = StyleSheet.create({
     gap: 9,
     marginTop: 12,
   },
+  salonSectionTabs: { flexDirection: "row", gap: 7, padding: 5, borderRadius: 17, backgroundColor: "#EDF5EE", marginTop: 8 },
+  salonSectionFooter: { backgroundColor: C.white, borderTopWidth: 1, borderTopColor: C.line, paddingHorizontal: 12, paddingTop: 8 },
+  stylistFeedbackCard: { marginTop: 14, padding: 16, borderRadius: 19, backgroundColor: C.pale, borderWidth: 1, borderColor: C.line, gap: 12 },
+  stylistFeedbackSent: { backgroundColor: '#EAF4EA', borderColor: '#C9DEC9' },
+  stylistFeedbackHeader: { flexDirection: 'row', alignItems: 'center', gap: 11 },
+  stylistFeedbackIcon: { width: 39, height: 39, borderRadius: 14, backgroundColor: C.rose, alignItems: 'center', justifyContent: 'center' },
+  stylistFeedbackIconPending: { width: 36, height: 36, borderRadius: 13, backgroundColor: '#DCEBDD', alignItems: 'center', justifyContent: 'center' },
+  stylistFeedbackTitle: { color: C.roseDark, fontSize: 15, fontWeight: '800' },
+  stylistFeedbackSub: { color: C.muted, fontSize: 11, lineHeight: 16, marginTop: 3 },
+  stylistFeedbackInput: { width: '100%', minHeight: 78, marginTop: 2, padding: 13, borderWidth: 1, borderColor: C.line, borderRadius: 14, backgroundColor: C.white, color: C.ink, textAlignVertical: 'top' },
+  stylistFeedbackQuote: { padding: 14, borderRadius: 15, backgroundColor: C.white, borderWidth: 1, borderColor: '#DDE9DC', gap: 8 },
+  stylistFeedbackQuoteTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  stylistFeedbackStars: { color: C.gold, fontSize: 16, letterSpacing: 2 },
+  stylistFeedbackYourRating: { color: C.muted, fontSize: 9, fontWeight: '800', letterSpacing: 1 },
+  stylistFeedbackQuoteText: { color: C.ink, fontSize: 13, lineHeight: 20 },
+  salonSectionTab: { flex: 1, minHeight: 44, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5, borderRadius: 13, paddingHorizontal: 7 },
+  salonSectionTabActive: { backgroundColor: C.rose },
+  salonSectionTabText: { color: C.roseDark, fontSize: 12, fontWeight: "700" },
+  salonSectionTabTextActive: { color: C.white },
+  salonSectionTabCount: { color: C.muted, fontSize: 10, fontWeight: "700" },
   salonDetailGrid: { flexDirection: "row", flexWrap: "wrap", gap: 12 },
   salonServiceCard: {
     flexGrow: 1,
