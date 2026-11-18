@@ -65,7 +65,7 @@ export default function HairPreviewScreen() {
     <ScrollView contentContainerStyle={styles.container}>
       <View style={styles.header}>
         <View style={styles.brandMark}><Ionicons name="cut-outline" size={20} color="#FFFFFF" /></View>
-        <Text style={styles.brand}>FACEFIT <Text style={styles.brandAccent}>STUDIO</Text></Text>
+        <Text style={styles.brand}>hAIrfit <Text style={styles.brandAccent}>STUDIO</Text></Text>
       </View>
       <Text style={styles.eyebrow}>AI HAIRSTYLE PREVIEW</Text>
       <Text style={styles.title}>See a new look on you.</Text>

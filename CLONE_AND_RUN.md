@@ -8,9 +8,9 @@ Install these tools before starting:
 
 - [Git](https://git-scm.com/downloads)
 - [Node.js](https://nodejs.org/) 24 LTS (includes npm)
+- PHP 8.1 or newer with cURL and PDO MySQL enabled (for Gemini face analysis)
 - [Expo Go for SDK 57](https://expo.dev/go?sdkVersion=57) on an Android or iOS phone, or an Android/iOS emulator
 - MySQL 8 or MariaDB for the API and database
-- Python 3.10 or newer if you want to use face analysis
 
 ## 1. Clone the repository
 
@@ -100,32 +100,6 @@ EXPO_PUBLIC_API_URL=http://192.168.1.10:3000
 
 Replace `192.168.1.10` with the computer's actual IPv4 address, then stop and restart Expo.
 
-## 4. Run face analysis (optional)
-
-Face analysis requires a third terminal. From the FaceFit folder, run the commands for your operating system.
-
-Windows PowerShell:
-
-```powershell
-cd face-analysis-service
-py -m venv .venv
-.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-uvicorn app:app --host 0.0.0.0 --port 8000
-```
-
-macOS or Linux:
-
-```bash
-cd face-analysis-service
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-uvicorn app:app --host 0.0.0.0 --port 8000
-```
-
-The API uses `http://127.0.0.1:8000` by default through the `FACE_ANALYSIS_URL` value in `server/.env`.
-
 ## Daily startup
 
 After the first setup, start each required service in a separate terminal:
@@ -138,17 +112,22 @@ npm run dev
 # Terminal 2: Expo app
 cd FaceFit
 npm start
+
+# Terminal 3: PHP face-analysis API (optional until you use the scanner)
+cd FaceFit/php-api
+php -S 0.0.0.0:8000 -t public
 ```
 
-Start the Python service in a third terminal only when face analysis is needed.
+Configure `php-api/.env` from `php-api/.env.example` with your Gemini API key. For signed-in scan-history support, also set the same `JWT_SECRET` and MySQL connection values used by the existing API. The app's `EXPO_PUBLIC_FACE_ANALYSIS_API_URL` defaults to `auto` and uses port `8000`; set it to the deployed PHP API URL for production.
 
 ## Common problems
 
 - **Expo cannot connect to the API:** Confirm the phone and computer use the same Wi-Fi, allow Node.js through the firewall, and use the computer's IPv4 address in `.env`.
+- **Face scan cannot connect:** Confirm the PHP server is running on port `8000`, allow PHP through the firewall, and set `EXPO_PUBLIC_FACE_ANALYSIS_API_URL` to the computer's reachable address if automatic detection fails.
 - **Database connection fails:** Confirm MySQL is running and the `DB_HOST`, `DB_PORT`, `DB_USER`, and `DB_PASSWORD` values in `server/.env` are correct.
 - **Port already in use:** Change `PORT` in `server/.env` and `EXPO_PUBLIC_API_PORT` in `.env` to the same available port.
+- **PHP port already in use:** Start PHP with another port and set `EXPO_PUBLIC_FACE_ANALYSIS_API_PORT` in `.env` to match.
 - **Dependencies behave unexpectedly:** Stop the running process, run `npm install` again in both `FaceFit` and `FaceFit/server`, then restart the services.
-- **PowerShell blocks virtual-environment activation:** Run `Set-ExecutionPolicy -Scope Process Bypass`, then activate `.venv` again.
 
 ## Booking deposits and schedule requests
 

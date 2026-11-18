@@ -3,6 +3,8 @@ import { Platform } from 'react-native';
 
 const CONFIGURED_URL = process.env.EXPO_PUBLIC_API_URL?.trim();
 const API_PORT = process.env.EXPO_PUBLIC_API_PORT?.trim() || '3000';
+const CONFIGURED_FACE_ANALYSIS_URL = process.env.EXPO_PUBLIC_FACE_ANALYSIS_API_URL?.trim();
+const FACE_ANALYSIS_API_PORT = process.env.EXPO_PUBLIC_FACE_ANALYSIS_API_PORT?.trim() || '8000';
 
 function normalizeUrl(url: string) {
   const normalized = url.replace(/\/$/, '');
@@ -26,4 +28,17 @@ export function resolveApiUrl() {
   return `http://${fallbackHost}:${API_PORT}`;
 }
 
+export function resolveFaceAnalysisApiUrl() {
+  if (CONFIGURED_FACE_ANALYSIS_URL && CONFIGURED_FACE_ANALYSIS_URL.toLowerCase() !== 'auto') {
+    return normalizeUrl(CONFIGURED_FACE_ANALYSIS_URL);
+  }
+
+  const expoHost = Constants.expoConfig?.hostUri?.match(/^([^:]+)/)?.[1];
+  if (expoHost) return `http://${expoHost}:${FACE_ANALYSIS_API_PORT}`;
+
+  const fallbackHost = Platform.OS === 'android' ? '10.0.2.2' : 'localhost';
+  return `http://${fallbackHost}:${FACE_ANALYSIS_API_PORT}`;
+}
+
 export const API_URL = resolveApiUrl();
+export const FACE_ANALYSIS_API_URL = resolveFaceAnalysisApiUrl();

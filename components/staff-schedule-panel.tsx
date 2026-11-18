@@ -4,7 +4,7 @@ import { getStaffSchedule, type StaffSchedule } from '@/services/api';
 
 function phToday() { return new Date(Date.now()+8*3600000).toISOString().slice(0,10); }
 function time(value: string) { return new Date(value.replace(' ','T')+'+08:00').toLocaleTimeString('en-PH',{timeZone:'Asia/Manila',hour:'numeric',minute:'2-digit'}); }
-export function StaffSchedulePanel({ salonId, token, initialDate, inline = false, followSelectedDate = false }: { salonId: number; token?: string | null; initialDate?: string | null; inline?: boolean; followSelectedDate?: boolean }) {
+export function StaffSchedulePanel({ salonId, token, initialDate, inline = false, followSelectedDate = false, showHeading = true, selectedStaffId }: { salonId: number; token?: string | null; initialDate?: string | null; inline?: boolean; followSelectedDate?: boolean; showHeading?: boolean; selectedStaffId?: number | null }) {
   const [visible,setVisible]=useState(false);
   const [date,setDate]=useState(initialDate || phToday());
   const [data,setData]=useState<StaffSchedule | null>(null);
@@ -12,6 +12,9 @@ export function StaffSchedulePanel({ salonId, token, initialDate, inline = false
   const [error,setError]=useState('');
   const [refresh,setRefresh]=useState(0);
   const scheduleDate = followSelectedDate ? initialDate : date;
+  const displayedStaff = selectedStaffId == null
+    ? data?.staff || []
+    : (data?.staff || []).filter(member => member.id === selectedStaffId);
   useEffect(()=>{
     if (!visible && !inline) return;
     if (!scheduleDate) { setData(null); setError(''); setLoading(false); return; }
@@ -27,8 +30,10 @@ export function StaffSchedulePanel({ salonId, token, initialDate, inline = false
     current.setUTCDate(current.getUTCDate()+days);setDate(current.toISOString().slice(0,10));
   };
   if (inline) return <View style={styles.inline}>
+    {showHeading && <>
     <Text style={styles.heading}>Staff & availability</Text>
         <Text style={styles.copy}>All times are Philippine time. Availability follows saved salon hours and current bookings.</Text>
+    </>}
         {followSelectedDate ? <Text style={styles.label}>{scheduleDate
           ? new Date(`${scheduleDate}T12:00:00+08:00`).toLocaleDateString('en-PH', { timeZone: 'Asia/Manila', weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
           : 'Choose a day in the booking calendar to see staff availability.'}</Text> : <View style={styles.row}>
@@ -44,7 +49,8 @@ export function StaffSchedulePanel({ salonId, token, initialDate, inline = false
             <Text style={styles.copy}>{data.canSeeClients ? 'Salon view: full client names and services.' : token ? 'Booked clients are shown by first name only.' : 'Sign in to see client first-name labels on booked slots.'}</Text>
             {!data.openingTime && <Text style={styles.copy}>Salon hours are not configured. Contact the salon to confirm availability.</Text>}
             {data.staff.length===0 && <Text style={styles.copy}>No staff profiles are available for this salon.</Text>}
-            {data.staff.map(member=><View key={member.id} style={styles.card}>
+            {selectedStaffId != null && displayedStaff.length===0 && <Text style={styles.copy}>No schedule details are available for this stylist on this date.</Text>}
+            {displayedStaff.map(member=><View key={member.id} style={styles.card}>
               <Text style={styles.name}>{member.name}</Text>
               <Text style={styles.copy}>{member.isAvailable ? 'Accepting appointments' : 'Unavailable — not accepting new appointments'}</Text>
               <Text style={styles.label}>Available time ranges</Text>
@@ -81,7 +87,8 @@ export function StaffSchedulePanel({ salonId, token, initialDate, inline = false
             <Text style={styles.copy}>{data.canSeeClients ? 'Salon view: full client names and services.' : token ? 'Booked clients are shown by first name only.' : 'Sign in to see client first-name labels on booked slots.'}</Text>
             {!data.openingTime && <Text style={styles.copy}>Salon hours are not configured. Contact the salon to confirm availability.</Text>}
             {data.staff.length===0 && <Text style={styles.copy}>No staff profiles are available for this salon.</Text>}
-            {data.staff.map(member=><View key={member.id} style={styles.card}>
+            {selectedStaffId != null && displayedStaff.length===0 && <Text style={styles.copy}>No schedule details are available for this stylist on this date.</Text>}
+            {displayedStaff.map(member=><View key={member.id} style={styles.card}>
               <Text style={styles.name}>{member.name}</Text>
               <Text style={styles.copy}>{member.isAvailable ? 'Accepting appointments' : 'Unavailable — not accepting new appointments'}</Text>
               <Text style={styles.label}>Available time ranges</Text>

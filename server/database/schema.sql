@@ -401,12 +401,22 @@ WHERE s.is_active = TRUE
 -- Non-login demo staff profiles for customer-facing salon previews.
 -- The random password hash has no known login password.
 INSERT IGNORE INTO users (full_name, email, password_hash, phone, role)
-SELECT 'Alex Reyes', CONCAT('alex.salon', s.id, '@facefit.local'),
+SELECT ELT(MOD(s.id - 1, 24) + 1,
+       'Alex Reyes', 'Jordan Cruz', 'Taylor Flores', 'Kai Villanueva', 'Sam Rivera', 'Riley Navarro',
+       'Noah Garcia', 'Avery Ramos', 'Luca Santiago', 'Quinn Lopez', 'Drew Bautista', 'Casey Dela Cruz',
+       'Morgan Castillo', 'Parker Morales', 'Jamie Mendoza', 'Cameron Dizon', 'Robin Lim', 'Elliot Fernandez',
+       'Jules Mercado', 'Sage Villareal', 'Charlie Aquino', 'Skyler Torres', 'Dakota Valdez', 'Nico Flores'),
+       CONCAT('alex.salon', s.id, '@facefit.local'),
        '$2b$12$V62YlpeyhT3cdp1GP4UJYem0s6IHeI3daKsXrc.Tqe.CcR82d1/2S',
        NULL, 'stylist'
 FROM salons s;
 INSERT IGNORE INTO users (full_name, email, password_hash, phone, role)
-SELECT 'Mika Santos', CONCAT('mika.salon', s.id, '@facefit.local'),
+SELECT ELT(MOD(s.id - 1, 24) + 1,
+       'Mika Santos', 'Angelica Rosales', 'Gabriel Enriquez', 'Celine Santiago', 'Francis Tolentino', 'Asha Cabrera',
+       'Rafael Mendoza', 'Mia Evangelista', 'Devon Manalo', 'Lara Bautista', 'Bailey Gonzales', 'Ira Dominguez',
+       'Gabby Loyola', 'Kris Pineda', 'Harper Soriano', 'Noel Ramos', 'Arielle Pascual', 'Emery Salazar',
+       'Kendall Bautista', 'Lio Castillo', 'Dylan Flores', 'Toni Mercado', 'Cory Delgado', 'Dani Fernandez'),
+       CONCAT('mika.salon', s.id, '@facefit.local'),
        '$2b$12$V62YlpeyhT3cdp1GP4UJYem0s6IHeI3daKsXrc.Tqe.CcR82d1/2S',
        NULL, 'stylist'
 FROM salons s;
@@ -421,33 +431,41 @@ FROM salons s
 JOIN users u ON u.email = CONCAT('mika.salon', s.id, '@facefit.local')
 WHERE NOT EXISTS (SELECT 1 FROM stylists st WHERE st.user_id = u.id);
 
--- Non-login demo customers used only to provide representative salon reviews.
-INSERT IGNORE INTO users (full_name, email, password_hash, phone, role) VALUES
-  ('Angela Cruz', 'demo.review.angela@facefit.local', '$2b$12$V62YlpeyhT3cdp1GP4UJYem0s6IHeI3daKsXrc.Tqe.CcR82d1/2S', NULL, 'customer'),
-  ('Carlo Mendoza', 'demo.review.carlo@facefit.local', '$2b$12$V62YlpeyhT3cdp1GP4UJYem0s6IHeI3daKsXrc.Tqe.CcR82d1/2S', NULL, 'customer'),
-  ('Mae Villanueva', 'demo.review.mae@facefit.local', '$2b$12$V62YlpeyhT3cdp1GP4UJYem0s6IHeI3daKsXrc.Tqe.CcR82d1/2S', NULL, 'customer');
+-- Refresh display names for existing demo accounts so different salons do
+-- not show repeated Alex Reyes and Mika Santos entries in stylist rankings.
+UPDATE users u
+JOIN stylists st ON st.user_id = u.id
+JOIN salons s ON s.id = st.salon_id
+SET u.full_name = CASE
+  WHEN u.email = CONCAT('alex.salon', s.id, '@facefit.local') THEN ELT(MOD(s.id - 1, 24) + 1,
+    'Alex Reyes', 'Jordan Cruz', 'Taylor Flores', 'Kai Villanueva', 'Sam Rivera', 'Riley Navarro',
+    'Noah Garcia', 'Avery Ramos', 'Luca Santiago', 'Quinn Lopez', 'Drew Bautista', 'Casey Dela Cruz',
+    'Morgan Castillo', 'Parker Morales', 'Jamie Mendoza', 'Cameron Dizon', 'Robin Lim', 'Elliot Fernandez',
+    'Jules Mercado', 'Sage Villareal', 'Charlie Aquino', 'Skyler Torres', 'Dakota Valdez', 'Nico Flores')
+  WHEN u.email = CONCAT('mika.salon', s.id, '@facefit.local') THEN ELT(MOD(s.id - 1, 24) + 1,
+    'Mika Santos', 'Angelica Rosales', 'Gabriel Enriquez', 'Celine Santiago', 'Francis Tolentino', 'Asha Cabrera',
+    'Rafael Mendoza', 'Mia Evangelista', 'Devon Manalo', 'Lara Bautista', 'Bailey Gonzales', 'Ira Dominguez',
+    'Gabby Loyola', 'Kris Pineda', 'Harper Soriano', 'Noel Ramos', 'Arielle Pascual', 'Emery Salazar',
+    'Kendall Bautista', 'Lio Castillo', 'Dylan Flores', 'Toni Mercado', 'Cory Delgado', 'Dani Fernandez')
+  ELSE u.full_name
+END
+WHERE u.email LIKE 'alex.salon%@facefit.local' OR u.email LIKE 'mika.salon%@facefit.local';
 
-INSERT INTO reviews (user_id, salon_id, rating, comment)
-SELECT u.id, s.id, 5, 'Friendly staff and a clean, comfortable salon. The consultation was clear and helpful.'
-FROM salons s JOIN users u ON u.email = 'demo.review.angela@facefit.local'
-WHERE NOT EXISTS (
-  SELECT 1 FROM reviews r WHERE r.user_id = u.id AND r.salon_id = s.id
-    AND r.comment = 'Friendly staff and a clean, comfortable salon. The consultation was clear and helpful.'
-);
-INSERT INTO reviews (user_id, salon_id, rating, comment)
-SELECT u.id, s.id, 4, 'The service started on time and the stylist listened carefully to the look I wanted.'
-FROM salons s JOIN users u ON u.email = 'demo.review.carlo@facefit.local'
-WHERE NOT EXISTS (
-  SELECT 1 FROM reviews r WHERE r.user_id = u.id AND r.salon_id = s.id
-    AND r.comment = 'The service started on time and the stylist listened carefully to the look I wanted.'
-);
-INSERT INTO reviews (user_id, salon_id, rating, comment)
-SELECT u.id, s.id, 5, 'Great result and professional service. I would book here again for my next haircut.'
-FROM salons s JOIN users u ON u.email = 'demo.review.mae@facefit.local'
-WHERE NOT EXISTS (
-  SELECT 1 FROM reviews r WHERE r.user_id = u.id AND r.salon_id = s.id
-    AND r.comment = 'Great result and professional service. I would book here again for my next haircut.'
+-- Remove historical sample reviews from earlier database seeds. Ratings below
+-- must represent reviews submitted by actual FACE-FIT accounts only.
+DELETE r FROM reviews r
+JOIN users u ON u.id = r.user_id
+WHERE u.email IN (
+  'demo.review.angela@facefit.local',
+  'demo.review.carlo@facefit.local',
+  'demo.review.mae@facefit.local'
 );
 
 UPDATE salons s
-SET s.rating = (SELECT COALESCE(AVG(r.rating), 0) FROM reviews r WHERE r.salon_id = s.id);
+SET s.rating = (
+  SELECT COALESCE(AVG(r.rating), 0)
+  FROM reviews r
+  JOIN users reviewer ON reviewer.id = r.user_id
+  WHERE r.salon_id = s.id
+    AND reviewer.email NOT LIKE 'demo.review.%@facefit.local'
+);

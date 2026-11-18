@@ -1,7 +1,7 @@
 import type { OwnerTab } from './owner-tab-bar';
 import { Ionicons } from '@expo/vector-icons';
 import { type ComponentRef, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Image, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Image, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import Svg, { Circle, G, Line, Path, Text as SvgText } from 'react-native-svg';
 
 import { getApiAssetUrl, type AuthUser, type OwnerDashboard } from '@/services/api';
@@ -352,6 +352,8 @@ function DatePickerModal({ visible, selectedDate, maxDate, onSelect, onClose }: 
 }
 
 export function OwnerDashboardScreen({ scrollRequest, onSectionChange, dashboard, user, loading, error, unreadNotifications, desktop, onNotifications, onNavigate, onReload, onLogout }: Props) {
+  const { width } = useWindowDimensions();
+  const tablet = width >= 600 && width < 900;
   const scrollRef = useRef<ComponentRef<typeof ScrollView>>(null);
   const anchors = useRef<Partial<Record<OwnerTab, number>>>({ dashboard: 0 });
   const lastRequest = useRef<number | null>(null);
@@ -423,7 +425,7 @@ export function OwnerDashboardScreen({ scrollRequest, onSectionChange, dashboard
 
   return <>
     <ScrollView ref={scrollRef} showsVerticalScrollIndicator={false} scrollEventThrottle={16}
-      contentContainerStyle={{ paddingHorizontal: desktop ? 56 : 22, paddingTop: desktop ? 36 : 20, paddingBottom: 40 }}
+      contentContainerStyle={{ width: '100%', maxWidth: 1440, alignSelf: 'center', paddingHorizontal: desktop ? (width >= 1440 ? 64 : 40) : tablet ? 32 : 22, paddingTop: desktop ? 36 : tablet ? 28 : 20, paddingBottom: 40 }}
       onScroll={({ nativeEvent }) => {
         const probe = nativeEvent.contentOffset.y + 100;
         const atBottom = nativeEvent.contentOffset.y > 0 && nativeEvent.contentOffset.y + nativeEvent.layoutMeasurement.height >= nativeEvent.contentSize.height - 4;
@@ -432,7 +434,7 @@ export function OwnerDashboardScreen({ scrollRequest, onSectionChange, dashboard
         onSectionChange(active);
       }}>
     <View style={styles.header}>
-      <View style={styles.logo}><Image resizeMode="contain" accessibilityLabel="FaceFit logo" source={faceFitLogo} style={styles.logoImage} /></View>
+      <View style={styles.logo}><Image resizeMode="contain" accessibilityLabel="hAIrfit logo" source={faceFitLogo} style={styles.logoImage} /></View>
       <Text style={styles.headerTitle}>Salon dashboard</Text>
       <Pressable accessibilityRole="button" accessibilityLabel={`${unreadNotifications} unread notifications`} onPress={onNotifications} style={styles.headerAction}>
         <Ionicons name="notifications-outline" size={21} color={colors.ink} />
@@ -443,7 +445,7 @@ export function OwnerDashboardScreen({ scrollRequest, onSectionChange, dashboard
     <View style={styles.hero}>
       <View style={styles.heroGlow} />
       <View style={styles.heroTop}>
-        <Pressable accessibilityRole="button" accessibilityLabel="Log out of FaceFit" onPress={onLogout} style={({ pressed }) => [styles.logout, pressed && styles.pressed]}>
+        <Pressable accessibilityRole="button" accessibilityLabel="Log out of hAIrfit" onPress={onLogout} style={({ pressed }) => [styles.logout, pressed && styles.pressed]}>
           <Ionicons name="log-out-outline" size={17} color={colors.roseDark} />
           <Text style={styles.logoutText}>Log out</Text>
         </Pressable>
@@ -466,7 +468,7 @@ export function OwnerDashboardScreen({ scrollRequest, onSectionChange, dashboard
       : <>
         <View>
         <SectionHeading eyebrow="PERFORMANCE" title="Today at a glance" />
-        <View style={styles.metricsGrid}>{metrics.map(metric => <View key={metric.label} style={[styles.metricCard, { flexBasis: desktop ? '22%' : '46%' }]}><View style={[styles.metricIcon, metric.tone]}><Ionicons name={metric.icon} size={21} color={colors.roseDark} /></View><Text style={styles.metricValue}>{metric.value}</Text><Text style={styles.metricLabel}>{metric.label}</Text><Text style={styles.metricCaption}>{metric.caption}</Text></View>)}</View>
+    <View style={styles.metricsGrid}>{metrics.map(metric => <View key={metric.label} style={[styles.metricCard, { flexBasis: desktop ? '22%' : '47%' }]}><View style={[styles.metricIcon, metric.tone]}><Ionicons name={metric.icon} size={21} color={colors.roseDark} /></View><Text style={styles.metricValue}>{metric.value}</Text><Text style={styles.metricLabel}>{metric.label}</Text><Text style={styles.metricCaption}>{metric.caption}</Text></View>)}</View>
 
         </View>
         <View onLayout={event => recordSection('analytics', event.nativeEvent.layout.y)}>
@@ -531,8 +533,8 @@ export function OwnerDashboardScreen({ scrollRequest, onSectionChange, dashboard
         </View>
         <View onLayout={event => recordSection('manage', event.nativeEvent.layout.y)}>
         <SectionHeading eyebrow="QUICK ACCESS" title="Manage your salon" />
-        <View style={styles.managementGrid}>{navigation.map((item, index) => <Pressable accessibilityRole="button" key={item.label} onPress={() => onNavigate(item.destination)} style={({ pressed }) => [styles.managementCard, { flexBasis: desktop ? '30%' : '100%' }, pressed && styles.pressed]}><View style={[styles.managementIcon, index % 3 === 1 && styles.metricGold, index % 3 === 2 && styles.metricGreen]}><Ionicons name={item.icon} size={22} color={colors.roseDark} /></View><View style={styles.grow}><Text style={styles.managementTitle}>{item.label}</Text><Text style={styles.managementDescription}>{index === 0 ? `${dashboard?.pendingBookings ?? 0} requests waiting` : index === 1 ? `${dashboard?.serviceCount ?? 0} published services` : index === 2 ? `${dashboard?.availableStaff ?? 0} team members available` : index === 3 ? 'Update salon information' : `${dashboard?.reviewCount ?? 0} customer reviews`}</Text></View><Ionicons name="arrow-forward" size={18} color={colors.rose} /></Pressable>)}</View>
-        <View style={styles.health}><View style={styles.healthIcon}><Ionicons name="shield-checkmark" size={24} color={colors.white} /></View><View style={styles.grow}><Text style={styles.healthTitle}>Your salon is ready for bookings</Text><Text style={styles.healthText}>{dashboard?.serviceCount ?? 0} services are visible to FaceFit customers.</Text></View><Ionicons name="sparkles-outline" size={24} color="#6F946E" /></View>
+        <View style={styles.managementGrid}>{navigation.map((item, index) => <Pressable accessibilityRole="button" key={item.label} onPress={() => onNavigate(item.destination)} style={({ pressed }) => [styles.managementCard, { flexBasis: desktop ? '30%' : tablet ? '47%' : '100%' }, pressed && styles.pressed]}><View style={[styles.managementIcon, index % 3 === 1 && styles.metricGold, index % 3 === 2 && styles.metricGreen]}><Ionicons name={item.icon} size={22} color={colors.roseDark} /></View><View style={styles.grow}><Text style={styles.managementTitle}>{item.label}</Text><Text style={styles.managementDescription}>{index === 0 ? `${dashboard?.pendingBookings ?? 0} requests waiting` : index === 1 ? `${dashboard?.serviceCount ?? 0} published services` : index === 2 ? `${dashboard?.availableStaff ?? 0} team members available` : index === 3 ? 'Update salon information' : `${dashboard?.reviewCount ?? 0} customer reviews`}</Text></View><Ionicons name="arrow-forward" size={18} color={colors.rose} /></Pressable>)}</View>
+        <View style={styles.health}><View style={styles.healthIcon}><Ionicons name="shield-checkmark" size={24} color={colors.white} /></View><View style={styles.grow}><Text style={styles.healthTitle}>Your salon is ready for bookings</Text><Text style={styles.healthText}>{dashboard?.serviceCount ?? 0} services are visible to hAIrfit customers.</Text></View><Ionicons name="sparkles-outline" size={24} color="#6F946E" /></View>
         </View>
       </>}
     </ScrollView>

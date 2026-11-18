@@ -25,7 +25,7 @@ export function LocationMap({ coordinate, salons = [], onSelectSalon }: Location
 <style>
 html,body,#map{height:100%;margin:0;font-family:system-ui,sans-serif}.leaflet-container{background:#FFFFFF}
 .salon-wrap{position:relative;width:48px;height:48px}.salon-marker{width:44px;height:44px;border-radius:15px;background:#4A765A;border:3px solid #fff;box-shadow:0 4px 14px #3b202966;color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;box-sizing:border-box;font-weight:900;overflow:hidden}.salon-marker img{width:100%;height:100%;object-fit:cover}.salon-marker svg{width:18px;height:18px;fill:none;stroke:#fff;stroke-width:2}.salon-marker small{font-size:7px;line-height:8px;letter-spacing:.5px}.salon-label{position:absolute;left:50%;top:48px;transform:translateX(-50%);width:max-content;max-width:150px;padding:4px 7px;border-radius:7px;background:#fff;color:#355C45;box-shadow:0 2px 8px #0003;font-size:10px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.you-marker{width:24px;height:24px;border:5px solid #fff;border-radius:50%;background:#4A765A;box-shadow:0 0 0 8px #4A765A33,0 3px 10px #0004}.legend{position:absolute;z-index:999;left:14px;bottom:14px;background:#fff;border-radius:13px;padding:9px 12px;box-shadow:0 3px 12px #0002;font-size:12px;font-weight:750;color:#29332D}.legend b{color:#4A765A}.leaflet-popup-content{line-height:1.45}.open-button{display:block;width:100%;margin-top:9px;border:0;border-radius:8px;background:#4A765A;color:#fff;padding:7px 10px;font-weight:800;cursor:pointer}
-</style></head><body><div id="map"></div><div class="legend"><b>F</b> FaceFit salons · Blue dot is you</div>
+</style></head><body><div id="map"></div><div class="legend"><b>F</b> hAIrfit salons · Blue dot is you</div>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script><script>
 const salons=${salonData};const current=${currentLocation};
 const escapeHtml=value=>String(value||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -45,7 +45,7 @@ if(bounds.length>1)map.fitBounds(bounds,{padding:[55,55],maxZoom:16});
     allowFullScreen: true,
     srcDoc: html,
     style: { border: 0, display: 'block', height: '100%', inset: 0, position: 'absolute', width: '100%' },
-    title: `Your location and ${salons.length} nearby FaceFit salons`,
+    title: `Your location and ${salons.length} nearby hAIrfit salons`,
   })}</View>;
 }
 

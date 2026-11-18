@@ -16,7 +16,7 @@ export function SalonMap({ salons, onSelectSalon }: SalonMapProps) {
     }
   }, [salons]);
 
-  return <View style={styles.container}><MapView ref={map} initialRegion={{ ...nasugbu, latitudeDelta: 0.16, longitudeDelta: 0.16 }} showsUserLocation style={StyleSheet.absoluteFill} toolbarEnabled={false}>{salons.map(salon => <Marker key={salon.id} coordinate={salon} title={salon.name} description={salon.address} onCalloutPress={() => onSelectSalon?.(salon.id)}><View style={styles.marker}>{salon.profileImageUrl ? <Image source={{ uri: salon.profileImageUrl }} style={styles.markerLogo} /> : <Ionicons name="storefront" size={18} color="#FFFFFF" />}</View></Marker>)}</MapView><View style={[styles.legend, { pointerEvents: "none" }]}><View style={styles.legendMarker}><Ionicons name="storefront" size={13} color="#FFFFFF" /></View><Text style={styles.legendText}>FaceFit salon</Text></View></View>;
+  return <View style={styles.container}><MapView ref={map} initialRegion={{ ...nasugbu, latitudeDelta: 0.16, longitudeDelta: 0.16 }} showsUserLocation style={StyleSheet.absoluteFill} toolbarEnabled={false}>{salons.map(salon => <Marker key={salon.id} coordinate={salon} title={salon.name} description={salon.address} onCalloutPress={() => onSelectSalon?.(salon.id)}><View style={styles.marker}>{salon.profileImageUrl ? <Image source={{ uri: salon.profileImageUrl }} style={styles.markerLogo} /> : <Ionicons name="storefront" size={18} color="#FFFFFF" />}</View></Marker>)}</MapView><View style={[styles.legend, { pointerEvents: "none" }]}><View style={styles.legendMarker}><Ionicons name="storefront" size={13} color="#FFFFFF" /></View><Text style={styles.legendText}>hAIrfit salon</Text></View></View>;
 }
 
 const styles = StyleSheet.create({

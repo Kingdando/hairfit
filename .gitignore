@@ -39,9 +39,7 @@ server/uploads/
 # typescript
 *.tsbuildinfo
 
-# Python face-analysis service
-face-analysis-service/.venv/
-face-analysis-service/__pycache__/
+php-api/.env
 
 app-example
 

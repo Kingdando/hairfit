@@ -231,53 +231,6 @@ function optionalText(value, maxLength) {
   return String(value || '').trim().slice(0, maxLength) || null;
 }
 
-app.post('/api/face-analysis', authenticateOptional, async (request, response, next) => {
-  const { imageData } = request.body;
-  if (typeof imageData !== 'string' || imageData.length > 5.5 * 1024 * 1024) {
-    return response.status(400).json({ error: 'A face photo smaller than 4 MB is required.' });
-  }
-  const analysisUrl = (process.env.FACE_ANALYSIS_URL || 'http://127.0.0.1:8000').replace(/\/$/, '');
-  try {
-    const [profiles] = request.user ? await pool.execute(
-      'SELECT hair_type AS hairType, hair_length AS hairLength, hair_texture AS hairTexture, style_preference AS stylePreference FROM customer_profiles WHERE user_id = ? LIMIT 1',
-      [request.user.sub],
-    ) : [[]];
-    const requestedStylePreference = ['men', 'women'].includes(request.body.stylePreference)
-      ? request.body.stylePreference
-      : profiles[0]?.stylePreference || 'men';
-    const aiResponse = await fetch(`${analysisUrl}/analyze`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ imageData, ...(profiles[0] || {}), hairLength: optionalText(request.body.hairLength, 50) || profiles[0]?.hairLength || null, stylePreference: requestedStylePreference }),
-      signal: AbortSignal.timeout(30000),
-    });
-    const analysis = await aiResponse.json().catch(() => null);
-    if (!aiResponse.ok) {
-      return response.status(aiResponse.status === 422 ? 422 : 502).json({
-        error: analysis?.detail || 'Face analysis could not process this photo.',
-      });
-    }
-    if (request.user) {
-      const [privacyRows] = await pool.execute(
-        'SELECT save_scan_history AS saveScanHistory FROM privacy_settings WHERE user_id = ? LIMIT 1',
-        [request.user.sub],
-      );
-      if (privacyRows[0]?.saveScanHistory !== 0) {
-        await pool.execute(
-          'INSERT INTO face_analyses (user_id, face_shape, confidence) VALUES (?, ?, ?)',
-          [request.user.sub, analysis.faceShape, Number(analysis.confidence) * 100],
-        );
-      }
-    }
-    return response.json({ data: analysis });
-  } catch (error) {
-    if (error.name === 'TimeoutError' || error.cause?.code === 'ECONNREFUSED') {
-      return response.status(503).json({ error: 'The face-analysis service is unavailable. Start the Python service and try again.' });
-    }
-    return next(error);
-  }
-});
-
 async function attachReviewReplies(reviews, salonId) {
   const [replies] = await pool.execute(
     `SELECT rr.id, rr.review_id AS reviewId, rr.message, rr.image_path AS imageUrl,
@@ -464,8 +417,12 @@ app.get('/api/owner/dashboard', authenticate, async (request, response, next) =>
   try {
     const [rows] = await pool.execute(
       `SELECT s.id, s.name, s.address, s.phone, s.profile_image_path AS profileImageUrl,
-              COALESCE((SELECT ROUND(AVG(r.rating), 1) FROM reviews r WHERE r.salon_id = s.id), 0) AS rating,
-              (SELECT COUNT(*) FROM reviews r WHERE r.salon_id = s.id) AS reviewCount,
+              COALESCE((SELECT ROUND(AVG(r.rating), 1) FROM reviews r
+                        JOIN users reviewer ON reviewer.id = r.user_id
+                        WHERE r.salon_id = s.id AND reviewer.email NOT LIKE 'demo.review.%@facefit.local'), 0) AS rating,
+              (SELECT COUNT(*) FROM reviews r
+               JOIN users reviewer ON reviewer.id = r.user_id
+               WHERE r.salon_id = s.id AND reviewer.email NOT LIKE 'demo.review.%@facefit.local') AS reviewCount,
               (SELECT COUNT(*) FROM services sv WHERE sv.salon_id = s.id AND sv.is_active = TRUE AND sv.deleted_at IS NULL) AS serviceCount,
               (SELECT COUNT(*) FROM stylists st WHERE st.salon_id = s.id AND st.is_available = TRUE AND st.deleted_at IS NULL) AS availableStaff,
               (SELECT COUNT(*) FROM bookings b JOIN services sv ON sv.id = b.service_id
@@ -529,10 +486,16 @@ app.get('/api/owner/management', authenticate, async (request, response, next) =
   if (request.user.role !== 'owner') return response.status(403).json({ error: 'Salon owner access is required.' });
   try {
     const [salons] = await pool.execute(
-      `SELECT id, name, description, address, city, phone, website,
-              profile_image_path AS profileImageUrl, rating,
+      `SELECT s.id, s.name, s.description, s.address, s.city, s.phone, s.website,
+              s.profile_image_path AS profileImageUrl,
+              COALESCE((SELECT ROUND(AVG(r.rating), 1) FROM reviews r
+                        JOIN users reviewer ON reviewer.id = r.user_id
+                        WHERE r.salon_id = s.id AND reviewer.email NOT LIKE 'demo.review.%@facefit.local'), 0) AS rating,
+              (SELECT COUNT(*) FROM reviews r
+               JOIN users reviewer ON reviewer.id = r.user_id
+               WHERE r.salon_id = s.id AND reviewer.email NOT LIKE 'demo.review.%@facefit.local') AS reviewCount,
               opening_time AS openingTime, closing_time AS closingTime, is_active AS isActive
-       FROM salons WHERE owner_id = ? LIMIT 1`,
+       FROM salons s WHERE s.owner_id = ? LIMIT 1`,
       [request.user.sub],
     );
     const salon = salons[0];
@@ -577,7 +540,8 @@ app.get('/api/owner/management', authenticate, async (request, response, next) =
               r.owner_reply AS ownerReply, r.owner_replied_at AS ownerRepliedAt,
               u.full_name AS reviewerName
        FROM reviews r JOIN users u ON u.id = r.user_id
-       WHERE r.salon_id = ? ORDER BY r.created_at DESC`,
+       WHERE r.salon_id = ? AND u.email NOT LIKE 'demo.review.%@facefit.local'
+       ORDER BY r.created_at DESC`,
       [salon.id],
     );
     const [portfolioImages] = await pool.execute(
@@ -890,7 +854,7 @@ app.get('/api/account/:section', authenticate, async (request, response, next) =
                     FROM notifications n
                     LEFT JOIN reviews r ON n.destination = 'reviews' AND r.id = n.reference_id
                     WHERE n.user_id = ? ORDER BY n.created_at DESC, n.id DESC`,
-    reviews: `SELECT r.id, r.salon_id AS salonId, s.name AS title, CONCAT(r.rating, ' / 5', IF(r.comment IS NULL OR r.comment = '', '', CONCAT(' · ', r.comment))) AS detail, r.created_at AS createdAt FROM reviews r JOIN salons s ON s.id = r.salon_id WHERE r.user_id = ? ORDER BY r.created_at DESC`,
+    reviews: `SELECT r.id, r.salon_id AS salonId, s.name AS title, CONCAT(r.rating, ' / 5', IF(r.comment IS NULL OR r.comment = '', '', CONCAT(' · ', r.comment))) AS detail, r.created_at AS createdAt FROM reviews r JOIN salons s ON s.id = r.salon_id JOIN users reviewer ON reviewer.id = r.user_id WHERE r.user_id = ? AND reviewer.email NOT LIKE 'demo.review.%@facefit.local' ORDER BY r.created_at DESC`,
   };
   const query = queries[request.params.section];
   if (!query) return response.status(404).json({ error: 'Account section not found.' });
@@ -1004,7 +968,14 @@ app.get('/api/salons', async (request, response, next) => {
     let [salons] = await pool.execute(
       `SELECT DISTINCT s.id, s.name, s.description, s.address, s.city, s.latitude, s.longitude,
               s.phone, s.website, s.profile_image_path AS profileImageUrl,
-              s.source, s.source_url, s.rating, s.opening_time, s.closing_time,
+              s.source, s.source_url,
+              COALESCE((SELECT ROUND(AVG(r.rating), 1) FROM reviews r
+                        JOIN users reviewer ON reviewer.id = r.user_id
+                        WHERE r.salon_id = s.id AND reviewer.email NOT LIKE 'demo.review.%@facefit.local'), 0) AS rating,
+              (SELECT COUNT(*) FROM reviews r
+               JOIN users reviewer ON reviewer.id = r.user_id
+               WHERE r.salon_id = s.id AND reviewer.email NOT LIKE 'demo.review.%@facefit.local') AS reviewCount,
+              s.opening_time, s.closing_time,
               'exact' AS hairstyleMatchType
        FROM salons s
        LEFT JOIN salon_hairstyles sh ON sh.salon_id = s.id
@@ -1017,14 +988,21 @@ app.get('/api/salons', async (request, response, next) => {
              OR LOWER(COALESCE(s.description, '')) LIKE '%hair%')
            AND LOWER(COALESCE(s.description, '')) NOT LIKE '%nail%'
          ))
-       ORDER BY s.rating DESC, s.name ASC`,
+       ORDER BY rating DESC, s.name ASC`,
       [search, pattern, pattern, hairstyle, hairstyle, hairstyle],
     );
     if (hairstyle && salons.length === 0) {
       [salons] = await pool.execute(
         `SELECT DISTINCT s.id, s.name, s.description, s.address, s.city, s.latitude, s.longitude,
                 s.phone, s.website, s.profile_image_path AS profileImageUrl,
-                s.source, s.source_url, s.rating, s.opening_time, s.closing_time,
+                s.source, s.source_url,
+                COALESCE((SELECT ROUND(AVG(r.rating), 1) FROM reviews r
+                          JOIN users reviewer ON reviewer.id = r.user_id
+                          WHERE r.salon_id = s.id AND reviewer.email NOT LIKE 'demo.review.%@facefit.local'), 0) AS rating,
+                (SELECT COUNT(*) FROM reviews r
+                 JOIN users reviewer ON reviewer.id = r.user_id
+                 WHERE r.salon_id = s.id AND reviewer.email NOT LIKE 'demo.review.%@facefit.local') AS reviewCount,
+                s.opening_time, s.closing_time,
                 'general' AS hairstyleMatchType
          FROM salons s
          WHERE s.is_active = TRUE
@@ -1038,7 +1016,7 @@ app.get('/api/salons', async (request, response, next) => {
              WHERE sv.salon_id = s.id AND sv.is_active = TRUE AND sv.deleted_at IS NULL
                AND sv.name IN ('Classic Haircut', 'Premium Style Haircut', 'Event Hair Styling')
            )
-         ORDER BY s.rating DESC, s.name ASC`,
+         ORDER BY rating DESC, s.name ASC`,
         [search, pattern, pattern],
       );
     }
@@ -1132,7 +1110,7 @@ app.get('/api/salons/:salonId/reviews', async (request, response, next) => {
               u.full_name AS reviewerName
        FROM reviews r
        JOIN users u ON u.id = r.user_id
-       WHERE r.salon_id = ?
+       WHERE r.salon_id = ? AND u.email NOT LIKE 'demo.review.%@facefit.local'
        ORDER BY r.created_at DESC`,
       [request.params.salonId],
     );
@@ -1161,7 +1139,9 @@ app.get('/api/salons/:salonId/my-reviews', authenticate, async (request, respons
 
 async function updateSalonReviewSummary(salonId) {
   const [[summary]] = await pool.execute(
-    'SELECT COUNT(*) AS count, COALESCE(AVG(rating), 0) AS average FROM reviews WHERE salon_id = ?',
+    `SELECT COUNT(*) AS count, COALESCE(AVG(r.rating), 0) AS average
+     FROM reviews r JOIN users reviewer ON reviewer.id = r.user_id
+     WHERE r.salon_id = ? AND reviewer.email NOT LIKE 'demo.review.%@facefit.local'`,
     [salonId],
   );
   await pool.execute('UPDATE salons SET rating = ? WHERE id = ?', [Number(summary.average), salonId]);

@@ -82,7 +82,7 @@ export function BookingActions({ booking, token, owner, onUpdated, onRebook, cho
       <View style={styles.backdrop}><ScrollView contentContainerStyle={styles.modalScroll} keyboardShouldPersistTaps="handled"><View style={styles.sheet}>
         <Text style={styles.heading}>{ mode === 'deposit' ? 'Confirm with a down payment' : mode === 'reschedule' ? 'Request a new appointment time' : 'Payment receipt'}</Text>
         {mode === 'deposit' && <>
-          <Text style={styles.copy}>Pay PHP {amount.toFixed(2)} (20%) through GCash. Contact the salon to confirm its GCash recipient before sending money. FaceFit does not charge your account.</Text>
+          <Text style={styles.copy}>Pay PHP {amount.toFixed(2)} (20%) through GCash. Contact the salon to confirm its GCash recipient before sending money. hAIrfit does not charge your account.</Text>
           <Text style={styles.copy}>The salon verifies your receipt before confirming the appointment. The remaining balance is paid at the salon.</Text>
           <Text style={styles.label}>GCash reference number</Text>
           <TextInput accessibilityLabel="GCash reference number" style={styles.input} placeholder="10–20 digits" keyboardType="number-pad" value={reference} onChangeText={setReference} maxLength={20} />

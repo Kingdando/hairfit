@@ -1,5 +1,4 @@
-import { API_URL } from './api-config';
-import hairstyleCatalog from '../constants/hairstyle-catalog.json';
+import { API_URL, FACE_ANALYSIS_API_URL } from './api-config';
 
 export type Salon = {
   id: number;
@@ -15,6 +14,7 @@ export type Salon = {
   source: string | null;
   source_url: string | null;
   rating: number;
+  reviewCount?: number;
   opening_time: string | null;
   closing_time: string | null;
   hairstyleMatchType?: 'exact' | 'general';
@@ -219,6 +219,7 @@ export type OwnerSalonProfile = {
   website: string | null;
   profileImageUrl: string | null;
   rating: number;
+  reviewCount?: number;
   openingTime: string | null;
   closingTime: string | null;
   isActive: boolean;
@@ -348,29 +349,19 @@ export async function updateProfile(token: string, input: { fullName: string; em
 }
 
 export async function analyzeFace(token: string | null, imageData: string, stylePreference: 'men' | 'women' = 'men', hairLength?: string | null) {
-  const response = await fetchApi('/api/face-analysis', {
-    method: 'POST',
-    headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), 'Content-Type': 'application/json' },
-    body: JSON.stringify({ imageData, stylePreference, ...(hairLength ? { hairLength } : {}) }),
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${FACE_ANALYSIS_API_URL}/api/face-analysis.php`, {
+      method: 'POST',
+      headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ imageData, stylePreference, ...(hairLength ? { hairLength } : {}) }),
+    });
+  } catch {
+    throw new Error(`Cannot connect to the PHP face-analysis API at ${FACE_ANALYSIS_API_URL}. Start the PHP API and keep this device on the same Wi-Fi network.`);
+  }
   const result = await response.json().catch(() => null);
   if (!response.ok) throw new Error(result?.error || `Face analysis failed (${response.status})`);
-  const analysis = (result as { data: FaceAnalysis }).data;
-  // Older Python processes may still return face measurements with an empty list.
-  // Use the restored Python catalog locally; this never generates paid images.
-  const audience = stylePreference === 'women' ? 'women' : 'men';
-  const catalog = hairstyleCatalog[audience][analysis.faceShape] || [];
-  const matches = (analysis.recommendations || []).filter((item) =>
-    item && typeof item.name === 'string' && item.name.trim() &&
-    typeof item.reason === 'string' && Number.isFinite(item.score));
-  for (const [name, score, reason] of catalog) {
-    if (matches.some((item) => item.name === name)) continue;
-    matches.push({
-      name: String(name), reason: String(reason), audience,
-      score: Math.round(Number(score) * (0.88 + Math.max(0, Math.min(1, Number(analysis.confidence) || 0)) * 0.12)),
-    });
-  }
-  return { ...analysis, recommendations: matches };
+  return (result as { data: FaceAnalysis }).data;
 }
 
 export async function getOwnerDashboard(token: string) {

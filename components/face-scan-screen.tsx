@@ -10,6 +10,7 @@ import {
   Pressable,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -28,11 +29,17 @@ type FaceScanScreenProps = {
 };
 
 export function FaceScanScreen({ onBack, onCaptured }: FaceScanScreenProps) {
+  const { width: viewportWidth, height: viewportHeight } = useWindowDimensions();
   const [permission, requestPermission] = useCameraPermissions();
   const [facing, setFacing] = useState<CameraType>('front');
   const [cameraReady, setCameraReady] = useState(false);
   const [capturing, setCapturing] = useState(false);
   const camera = useRef<CameraView>(null);
+  const compactLayout = viewportWidth < 380 || viewportHeight < 620;
+  const controlsHeight = Math.max(96, Math.min(132, viewportHeight * 0.2));
+  const guideWidth = Math.min(230, viewportWidth * 0.62);
+  const guideHeight = Math.min(306, viewportHeight * 0.38);
+  const shutterSize = Math.min(78, Math.max(58, viewportWidth * 0.19));
 
   const pickImage = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -78,9 +85,9 @@ export function FaceScanScreen({ onBack, onCaptured }: FaceScanScreenProps) {
   };
 
   return (
-    <View style={[styles.shell, Platform.OS === 'web' && styles.shellWeb]}>
+    <View style={[styles.shell, Platform.OS === 'web' && styles.shellWeb, { maxWidth: Math.min(430, viewportWidth) }]}>
       <SafeAreaView style={styles.safe} edges={['top', 'left', 'right', 'bottom']}>
-        <View style={styles.header}>
+        <View style={[styles.header, compactLayout && styles.headerCompact]}>
           <Pressable accessibilityRole="button" accessibilityLabel="Go back" onPress={onBack} style={styles.headerButton}>
             <Ionicons name="chevron-back" size={23} color={colors.white} />
           </Pressable>
@@ -109,12 +116,12 @@ export function FaceScanScreen({ onBack, onCaptured }: FaceScanScreenProps) {
             />
 
             <View style={[styles.previewShade, { pointerEvents: "none" }]} />
-            <View style={[styles.guideArea, { pointerEvents: "none" }]}>
+            <View style={[styles.guideArea, compactLayout && styles.guideAreaCompact, { paddingBottom: controlsHeight + 16, pointerEvents: "none" }]}>
               <View style={styles.statusPill}>
                 <View style={[styles.statusDot, cameraReady && styles.statusDotReady]} />
                 <Text style={styles.statusText}>{cameraReady ? 'Center your face' : 'Starting camera'}</Text>
               </View>
-              <View style={styles.faceGuide}>
+              <View style={[styles.faceGuide, { width: guideWidth, height: guideHeight, borderRadius: guideWidth / 2 }]}>
                 <View style={[styles.guideCorner, styles.cornerTopLeft]} />
                 <View style={[styles.guideCorner, styles.cornerTopRight]} />
                 <View style={[styles.guideCorner, styles.cornerBottomLeft]} />
@@ -123,18 +130,18 @@ export function FaceScanScreen({ onBack, onCaptured }: FaceScanScreenProps) {
               <View style={styles.tipPill}><Ionicons name="sunny-outline" size={15} color={colors.white} /><Text style={styles.tip}>Face forward · remove glasses · use even light</Text></View>
             </View>
 
-            <View style={styles.controls}>
-              <Pressable accessibilityRole="button" accessibilityLabel="Choose photo from gallery" onPress={pickImage} style={({ pressed }) => [styles.toolButton, pressed && styles.pressed]}>
-                <Ionicons name="images-outline" size={23} color={colors.white} />
+            <View style={[styles.controls, { height: controlsHeight, paddingHorizontal: Math.max(12, Math.min(28, viewportWidth * 0.07)) }]}>
+              <Pressable accessibilityRole="button" accessibilityLabel="Choose photo from gallery" onPress={pickImage} style={({ pressed }) => [styles.toolButton, compactLayout && styles.toolButtonCompact, pressed && styles.pressed]}>
+                <Ionicons name="images-outline" size={compactLayout ? 20 : 23} color={colors.white} />
                 <Text style={styles.toolLabel}>Gallery</Text>
               </Pressable>
 
-              <Pressable accessibilityRole="button" accessibilityLabel="Take photo" disabled={!cameraReady || capturing} onPress={takePhoto} style={({ pressed }) => [styles.shutter, (!cameraReady || capturing) && styles.disabled, pressed && styles.pressed]}>
-                <View style={styles.shutterInner}>{capturing && <ActivityIndicator color={colors.white} />}</View>
+              <Pressable accessibilityRole="button" accessibilityLabel="Take photo" disabled={!cameraReady || capturing} onPress={takePhoto} style={({ pressed }) => [styles.shutter, { width: shutterSize, height: shutterSize, borderRadius: shutterSize / 2 }, (!cameraReady || capturing) && styles.disabled, pressed && styles.pressed]}>
+                <View style={[styles.shutterInner, { width: shutterSize - 14, height: shutterSize - 14, borderRadius: (shutterSize - 14) / 2 }]}>{capturing && <ActivityIndicator color={colors.white} />}</View>
               </Pressable>
 
-              <Pressable accessibilityRole="button" accessibilityLabel="Flip camera" onPress={() => setFacing(current => current === 'front' ? 'back' : 'front')} style={({ pressed }) => [styles.toolButton, pressed && styles.pressed]}>
-                <Ionicons name="camera-reverse-outline" size={25} color={colors.white} />
+              <Pressable accessibilityRole="button" accessibilityLabel="Flip camera" onPress={() => setFacing(current => current === 'front' ? 'back' : 'front')} style={({ pressed }) => [styles.toolButton, compactLayout && styles.toolButtonCompact, pressed && styles.pressed]}>
+                <Ionicons name="camera-reverse-outline" size={compactLayout ? 22 : 25} color={colors.white} />
                 <Text style={styles.toolLabel}>Flip</Text>
               </Pressable>
             </View>
@@ -175,6 +182,7 @@ const styles = StyleSheet.create({
   shellWeb: { maxWidth: '100%', alignSelf: 'stretch' },
   safe: { flex: 1 },
   header: { height: 70, paddingHorizontal: 16, flexDirection: 'row', alignItems: 'center', backgroundColor: colors.dark },
+  headerCompact: { height: 58, paddingHorizontal: 10 },
   headerButton: { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center', backgroundColor: '#4A765A' },
   headerCopy: { flex: 1, alignItems: 'center' },
   headerTitle: { color: colors.white, fontSize: 17, fontWeight: '800' },
@@ -183,6 +191,7 @@ const styles = StyleSheet.create({
   preview: { flex: 1, overflow: 'hidden', backgroundColor: '#29332D' },
   previewShade: { ...StyleSheet.absoluteFill, backgroundColor: 'rgba(16,12,14,0.14)' },
   guideArea: { ...StyleSheet.absoluteFill, paddingTop: 28, paddingBottom: 148, alignItems: 'center', justifyContent: 'space-between' },
+  guideAreaCompact: { paddingTop: 14 },
   statusPill: { height: 34, paddingHorizontal: 13, borderRadius: 17, flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: 'rgba(20,16,18,0.72)' },
   statusDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#6F946E' },
   statusDotReady: { backgroundColor: '#6F946E' },
@@ -197,6 +206,7 @@ const styles = StyleSheet.create({
   tip: { color: colors.white, fontSize: 11, fontWeight: '700', textShadowColor: 'rgba(0,0,0,0.7)', textShadowRadius: 5 },
   controls: { position: 'absolute', left: 0, right: 0, bottom: 0, height: 132, paddingHorizontal: 28, paddingBottom: 22, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: 'rgba(20,16,18,0.88)' },
   toolButton: { width: 64, height: 64, alignItems: 'center', justifyContent: 'center', gap: 5 },
+  toolButtonCompact: { width: 54, height: 60, gap: 2 },
   toolLabel: { color: colors.white, fontSize: 11, fontWeight: '600' },
   shutter: { width: 78, height: 78, borderRadius: 39, borderWidth: 4, borderColor: colors.white, alignItems: 'center', justifyContent: 'center' },
   shutterInner: { width: 62, height: 62, borderRadius: 31, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.rose },

@@ -34,7 +34,7 @@ export function CustomerSettingsScreen({ token, profile, onBack, onSaved }: Prop
   const choosePhoto = async () => {
     if (Platform.OS !== 'web') {
       const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (!permission.granted) return Alert.alert('Photo access needed', 'Allow FaceFit to select your profile picture.');
+      if (!permission.granted) return Alert.alert('Photo access needed', 'Allow hAIrfit to select your profile picture.');
     }
     const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsEditing: true, aspect: [1, 1], quality: .65, base64: true });
     if (result.canceled) return;

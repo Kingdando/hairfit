@@ -15,7 +15,7 @@ export function FaceLandmarkOverlay({ uri, imageSize, landmarks }: Props) {
   };
 
   const scale = viewport.width && viewport.height
-    ? Math.max(viewport.width / imageSize.width, viewport.height / imageSize.height)
+    ? Math.min(viewport.width / imageSize.width, viewport.height / imageSize.height)
     : 0;
   const renderedWidth = imageSize.width * scale;
   const renderedHeight = imageSize.height * scale;
@@ -23,7 +23,7 @@ export function FaceLandmarkOverlay({ uri, imageSize, landmarks }: Props) {
   const offsetY = (viewport.height - renderedHeight) / 2;
 
   return <View onLayout={onLayout} style={styles.container}>
-    <Image source={{ uri }} style={styles.image} />
+    <Image source={{ uri }} style={styles.image} resizeMode="contain" />
     {scale > 0 && landmarks.map((point, index) => {
       const left = offsetX + point.x * renderedWidth;
       const top = offsetY + point.y * renderedHeight;
@@ -34,7 +34,7 @@ export function FaceLandmarkOverlay({ uri, imageSize, landmarks }: Props) {
 }
 
 const styles = StyleSheet.create({
-  container: { width: '100%', height: '100%', overflow: 'hidden', backgroundColor: '#29332D' },
+  container: { width: '100%', height: '100%', overflow: 'hidden', backgroundColor: '#F8FAF7' },
   image: { ...StyleSheet.absoluteFill, width: '100%', height: '100%', },
   point: { position: 'absolute', width: 3, height: 3, borderRadius: 2, backgroundColor: '#6F946E', boxShadow: [{ offsetX: 0, offsetY: 0, blurRadius: 2, color: "rgba(53, 92, 69, 0.9)" }], elevation: 2 },
 });
