@@ -4,6 +4,9 @@
   "private": true,
   "description": "Express and MySQL API for FaceFit",
   "main": "src/server.js",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "dev": "node --watch src/server.js",
     "start": "node src/server.js",
