@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # FaceFit 💇‍♀️✨
 
 A beautiful beauty and hair services booking application built with React Native and Expo.
@@ -219,3 +220,6 @@ For issues or questions, please reach out or create an issue in the repository.
 ---
 
 **FaceFit** - Your Beauty & Hair Solution ✨💇‍♀️
+=======
+# HairFIT
+>>>>>>> 667c8b59d102283800ce26b4bc841d5effb0588d
