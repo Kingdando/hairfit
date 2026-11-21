@@ -2,25 +2,14 @@ require('dotenv').config();
 
 const fs = require('node:fs/promises');
 const path = require('node:path');
-const mysql = require('mysql2/promise');
+const { Client } = require('pg');
 
 async function initializeDatabase() {
-  const schema = await fs.readFile(path.join(__dirname, '..', 'database', 'schema.sql'), 'utf8');
-  const connection = await mysql.createConnection({
-    host: process.env.DB_HOST || 'localhost',
-    port: Number(process.env.DB_PORT || 3306),
-    user: process.env.DB_USER || 'root',
-    password: process.env.DB_PASSWORD || '',
-    multipleStatements: true,
-  });
-
-  try {
-    await connection.query(schema);
-    await require('../src/booking-routes').ensureBookingSchema(connection);
-    console.log(`Database ${process.env.DB_NAME || 'facefit'} initialized successfully.`);
-  } finally {
-    await connection.end();
-  }
+  if (!process.env.SUPABASE_DB_URL) throw new Error('SUPABASE_DB_URL is required.');
+  const schema = await fs.readFile(path.join(__dirname, '..', 'database', 'schema.supabase.sql'), 'utf8');
+  const client = new Client({ connectionString: process.env.SUPABASE_DB_URL, ssl: process.env.SUPABASE_DB_SSL === 'false' ? false : { rejectUnauthorized: false } });
+  try { await client.connect(); await client.query(schema); console.log('Supabase database schema initialized successfully.'); }
+  finally { await client.end(); }
 }
 
 initializeDatabase().catch((error) => {

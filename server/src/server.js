@@ -15,7 +15,7 @@ require('./booking-routes').ensureBookingSchema(pool).then(() => {
     console.error(`  ${cause.code || 'Connection error'}: ${cause.message || `${cause.address}:${cause.port}`}`);
   }
   if ([error, ...(error.errors || [])].some(cause => ['ECONNREFUSED', 'ETIMEDOUT', 'ENOTFOUND'].includes(cause.code))) {
-    console.error('Check that MySQL is running and DB_HOST / DB_PORT in server/.env point to it.');
+    console.error('Check that SUPABASE_DB_URL points to the Supabase Postgres connection string.');
   }
   await pool.end();
   process.exit(1);

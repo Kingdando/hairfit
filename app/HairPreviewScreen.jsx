@@ -2,9 +2,9 @@ import React, { useState } from 'react';
 import { View, Text, Image, ActivityIndicator, StyleSheet, ScrollView, Pressable } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
+import { API_URL } from '@/services/api-config';
 
-// REPLACE 192.168.X.X WITH YOUR COMPUTER'S LOCAL IP ADDRESS
-const API_URL = 'http://192.168.1.5:3000/api/ai-hairstyle-preview';
+const HAIRSTYLE_PREVIEW_URL = `${API_URL}/api/ai-hairstyle-preview`;
 
 export default function HairPreviewScreen() {
   const [imageUri, setImageUri] = useState(null);
@@ -38,7 +38,7 @@ export default function HairPreviewScreen() {
 
     setLoading(true);
     try {
-      const response = await fetch(API_URL, {
+      const response = await fetch(HAIRSTYLE_PREVIEW_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

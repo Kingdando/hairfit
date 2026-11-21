@@ -315,7 +315,7 @@ app.post('/api/auth/signup', async (request, response, next) => {
   } catch (error) {
     await connection.rollback();
     if (storedLogo) await removeManagedImage(storedLogo, 'salon').catch(() => {});
-    if (error.code === 'ER_DUP_ENTRY') return response.status(409).json({ error: 'An account with this email already exists.' });
+    if (['ER_DUP_ENTRY', '23505'].includes(error.code)) return response.status(409).json({ error: 'An account with this email already exists.' });
     return next(error);
   } finally {
     connection.release();
@@ -654,7 +654,7 @@ app.post('/api/owner/staff', authenticate, async (request, response, next) => {
     return response.status(201).json({ data: { id: stylistResult.insertId, name, email, phone, specialties, isAvailable: true, imageUrl: imagePath } });
   } catch (error) {
     if (connection) await connection.rollback();
-    if (error.code === 'ER_DUP_ENTRY') return response.status(409).json({ error: 'A staff account with this email already exists.' });
+    if (['ER_DUP_ENTRY', '23505'].includes(error.code)) return response.status(409).json({ error: 'A staff account with this email already exists.' });
     return next(error);
   } finally {
     connection?.release();
@@ -699,7 +699,7 @@ app.put('/api/owner/staff/:staffId', authenticate, async (request, response, nex
     return response.json({ data: { id: staffId, name, email, phone, specialties, isAvailable, imageUrl: imagePath } });
   } catch (error) {
     if (connection) await connection.rollback();
-    if (error.code === 'ER_DUP_ENTRY') return response.status(409).json({ error: 'A staff account with this email already exists.' });
+    if (['ER_DUP_ENTRY', '23505'].includes(error.code)) return response.status(409).json({ error: 'A staff account with this email already exists.' });
     return next(error);
   } finally {
     connection?.release();
@@ -1250,13 +1250,13 @@ app.use((_request, response) => response.status(404).json({ error: 'Route not fo
 
 app.use((error, _request, response, _next) => {
   console.error(error);
-  const isDatabaseInputError = ['ER_NO_REFERENCED_ROW_2', 'ER_DUP_ENTRY'].includes(error.code);
+  const isDatabaseInputError = ['ER_NO_REFERENCED_ROW_2', 'ER_DUP_ENTRY', '23503', '23505'].includes(error.code);
   const databaseUnavailable = isDatabaseUnavailable(error);
   response.status(error.status || (databaseUnavailable ? 503 : isDatabaseInputError ? 409 : 500)).json({
     error: error.status
       ? error.message
       : databaseUnavailable
-        ? 'Database unavailable. Start MySQL and verify DB_HOST and DB_PORT in the server configuration.'
+        ? 'Database unavailable. Verify the Supabase database connection in the server configuration.'
         : isDatabaseInputError
           ? 'The booking conflicts with existing data.'
           : 'Internal server error.',

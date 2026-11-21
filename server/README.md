@@ -1,13 +1,13 @@
 # FaceFit API
 
-Express API backed by MySQL. It is isolated from the Expo package so mobile and web builds are unchanged.
+Express API backed by Supabase PostgreSQL. It is isolated from the Expo package so mobile and web builds keep the existing API contract.
 
 ## Setup
 
-1. Install and start MySQL 8 or MariaDB.
-2. Copy `.env.example` to `.env` and enter your MySQL credentials.
+1. Create a Supabase project and copy its Postgres connection string.
+2. Copy `.env.example` to `.env` and set `SUPABASE_DB_URL` plus the other server secrets.
 3. Install packages with `npm install`.
-4. Create the database and tables with `npm run db:init`.
+4. Create the Supabase tables with `npm run db:init`.
 5. Start the API with `npm run dev`.
 
 ## Import real Nasugbu salons
@@ -21,9 +21,9 @@ npm run salons:import
 
 The importer fetches hairdresser and beauty-salon map features inside the Nasugbu administrative boundary from OpenStreetMap. It stores coordinates and source links and safely updates previously imported records. Public map coverage is community-maintained, so this cannot guarantee every operating salon is listed. Display `© OpenStreetMap contributors` anywhere this data appears in the app.
 
-The schema also seeds 11 publicly verified Nasugbu salon records. These records have source links, use no copied third-party rating, and are upserted safely whenever `npm run db:init` is run.
+For an existing deployment, use the one-time migration guide in the repository root to copy all legacy records. Fresh deployments can import salon data with the existing importer.
 
-The API runs at `http://localhost:4000` by default. Test it with `GET /api/health`.
+The API runs on the configured `PORT`. Test the deployed service with `GET /api/health`.
 
 ## Starter endpoints
 
@@ -48,10 +48,11 @@ For a physical phone, use your computer's LAN address instead of `localhost`, su
 
 ## Connect the Expo app
 
-Create `FaceFit/.env` (outside this server folder) and set:
+Create `FaceFit/.env` (outside this server folder) and set the deployed API URL:
 
 ```env
-EXPO_PUBLIC_API_URL=http://localhost:3000
+EXPO_PUBLIC_API_URL=https://your-facefit-api.example.com
+EXPO_PUBLIC_FACE_ANALYSIS_API_URL=https://your-face-analysis-api.example.com
 ```
 
-For a physical phone, replace `localhost` with the computer's Wi-Fi IPv4 address. Restart Expo after changing this value. The salon list and profile screens request their records from this API.
+Restart Expo after changing these values. The salon list and profile screens request their records from this API.

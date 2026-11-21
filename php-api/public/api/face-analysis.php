@@ -75,28 +75,48 @@ function optional_user_id(): ?int
 
 function record_scan_if_allowed(int $userId, string $shape, float $confidence): void
 {
-    $host = getenv('DB_HOST') ?: '';
-    $database = getenv('DB_NAME') ?: '';
-    $username = getenv('DB_USER') ?: '';
-    if ($host === '' || $database === '' || $username === '') {
-        throw new RuntimeException('Database settings are required to save signed-in scan history.');
+    $baseUrl = rtrim((string) (getenv('SUPABASE_URL') ?: ''), '/');
+    $serviceKey = (string) (getenv('SUPABASE_SERVICE_ROLE_KEY') ?: '');
+    if ($baseUrl === '' || $serviceKey === '') {
+        throw new RuntimeException('Supabase settings are required to save signed-in scan history.');
     }
 
-    $port = getenv('DB_PORT') ?: '3306';
-    $password = getenv('DB_PASSWORD') ?: '';
-    $pdo = new PDO(
-        "mysql:host={$host};port={$port};dbname={$database};charset=utf8mb4",
-        $username,
-        $password,
-        [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC]
-    );
-    $privacy = $pdo->prepare('SELECT save_scan_history FROM privacy_settings WHERE user_id = ? LIMIT 1');
-    $privacy->execute([$userId]);
-    $setting = $privacy->fetch();
-    if ($setting !== false && (int) $setting['save_scan_history'] === 0) return;
+    $request = static function (string $method, string $path, ?array $body = null) use ($baseUrl, $serviceKey): array {
+        $curl = curl_init($baseUrl . '/rest/v1/' . ltrim($path, '/'));
+        if ($curl === false) throw new RuntimeException('Unable to initialize Supabase request.');
+        $headers = [
+            'apikey: ' . $serviceKey,
+            'Authorization: Bearer ' . $serviceKey,
+            'Content-Type: application/json',
+        ];
+        if ($body !== null) $headers[] = 'Prefer: return=minimal';
+        curl_setopt_array($curl, [
+            CURLOPT_CUSTOMREQUEST => $method,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_CONNECTTIMEOUT => 10,
+            CURLOPT_TIMEOUT => 15,
+            CURLOPT_HTTPHEADER => $headers,
+            CURLOPT_POSTFIELDS => $body === null ? null : json_encode($body, JSON_UNESCAPED_SLASHES),
+        ]);
+        $response = curl_exec($curl);
+        $error = curl_error($curl);
+        $status = (int) curl_getinfo($curl, CURLINFO_RESPONSE_CODE);
+        curl_close($curl);
+        if ($response === false || $error !== '' || $status < 200 || $status >= 300) {
+            throw new RuntimeException('Supabase request failed: ' . ($error !== '' ? $error : 'HTTP ' . $status));
+        }
+        if ($response === '') return [];
+        $decoded = json_decode($response, true);
+        return is_array($decoded) ? $decoded : [];
+    };
 
-    $insert = $pdo->prepare('INSERT INTO face_analyses (user_id, face_shape, confidence) VALUES (?, ?, ?)');
-    $insert->execute([$userId, $shape, round($confidence * 100, 2)]);
+    $setting = $request('GET', 'privacy_settings?user_id=eq.' . rawurlencode((string) $userId) . '&select=save_scan_history&limit=1');
+    if (isset($setting[0]['save_scan_history']) && !$setting[0]['save_scan_history']) return;
+    $request('POST', 'face_analyses', [
+        'user_id' => $userId,
+        'face_shape' => $shape,
+        'confidence' => round($confidence * 100, 2),
+    ]);
 }
 
 if (($_SERVER['REQUEST_METHOD'] ?? '') === 'OPTIONS') {

@@ -2,7 +2,7 @@
   "name": "facefit-api",
   "version": "1.0.0",
   "private": true,
-  "description": "Express and MySQL API for FaceFit",
+  "description": "Express and Supabase Postgres API for FaceFit",
   "main": "src/server.js",
   "engines": {
     "node": ">=22"
@@ -11,6 +11,7 @@
     "dev": "node --watch src/server.js",
     "start": "node src/server.js",
     "db:init": "node scripts/init-db.js",
+    "db:migrate:supabase": "node scripts/migrate-to-supabase.js",
     "salons:import": "node scripts/import-nasugbu-salons.js",
     "salons:preview": "node scripts/import-nasugbu-salons.js --dry-run",
     "owner:create": "node scripts/create-salon-owner.js",
@@ -27,7 +28,10 @@
     "dotenv": "^17.2.3",
     "express": "^5.1.0",
     "jsonwebtoken": "^9.0.2",
-    "mysql2": "^3.15.3",
-    "open-location-code": "^1.0.3"
+    "open-location-code": "^1.0.3",
+    "pg": "^8.16.3"
+  },
+  "devDependencies": {
+    "mysql2": "^3.15.3"
   }
 }

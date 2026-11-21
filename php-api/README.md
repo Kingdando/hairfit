@@ -6,13 +6,13 @@ It does not save the uploaded photo. For signed-in users, it verifies the existi
 
 ## Requirements
 
-- PHP 8.1 or newer with cURL, PDO, and PDO MySQL enabled
+- PHP 8.1 or newer with cURL enabled
 - A Gemini API key with access to the configured model
-- The existing MySQL database if signed-in scan history should be saved
+- A Supabase project URL and server-only service role key if signed-in scan history should be saved
 
 ## Configure and run locally
 
-Copy `.env.example` to `.env`, set `GEMINI_API_KEY`, and set database and JWT values to match the existing API when using signed-in accounts. Keep this file private.
+Copy `.env.example` to `.env`, set `GEMINI_API_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and `JWT_SECRET`. Keep this file private.
 
 From this directory, run:
 
@@ -20,7 +20,7 @@ From this directory, run:
 php -S 0.0.0.0:8000 -t public
 ```
 
-The endpoint is `POST /api/face-analysis.php`. The Expo app discovers the PHP server on port `8000` by default when `EXPO_PUBLIC_FACE_ANALYSIS_API_URL=auto`; set that variable to a reachable base URL for a deployed API. The existing Node API remains responsible for the app's other routes.
+The endpoint is `POST /api/face-analysis.php`. Set `EXPO_PUBLIC_FACE_ANALYSIS_API_URL` to the deployed HTTPS URL of this service. The existing Node API remains responsible for the app's other routes.
 
 ## Response and precision
 

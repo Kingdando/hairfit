@@ -1,43 +1,22 @@
-import Constants from 'expo-constants';
-import { Platform } from 'react-native';
-
 const CONFIGURED_URL = process.env.EXPO_PUBLIC_API_URL?.trim();
-const API_PORT = process.env.EXPO_PUBLIC_API_PORT?.trim() || '3000';
 const CONFIGURED_FACE_ANALYSIS_URL = process.env.EXPO_PUBLIC_FACE_ANALYSIS_API_URL?.trim();
-const FACE_ANALYSIS_API_PORT = process.env.EXPO_PUBLIC_FACE_ANALYSIS_API_PORT?.trim() || '8000';
 
 function normalizeUrl(url: string) {
   const normalized = url.replace(/\/$/, '');
   if (!/^https?:\/\//i.test(normalized)) {
-    throw new Error('EXPO_PUBLIC_API_URL must be "auto" or start with http:// or https://');
+    throw new Error('EXPO_PUBLIC_API_URL must start with http:// or https://');
   }
   return normalized;
 }
 
 export function resolveApiUrl() {
-  if (CONFIGURED_URL && CONFIGURED_URL.toLowerCase() !== 'auto') {
-    return normalizeUrl(CONFIGURED_URL);
-  }
-
-  // The phone already reaches this host to load the Expo JavaScript bundle.
-  // Reusing it prevents the API address from breaking when the Wi-Fi IP changes.
-  const expoHost = Constants.expoConfig?.hostUri?.match(/^([^:]+)/)?.[1];
-  if (expoHost) return `http://${expoHost}:${API_PORT}`;
-
-  const fallbackHost = Platform.OS === 'android' ? '10.0.2.2' : 'localhost';
-  return `http://${fallbackHost}:${API_PORT}`;
+  if (!CONFIGURED_URL) throw new Error('EXPO_PUBLIC_API_URL is missing from the Expo environment.');
+  return normalizeUrl(CONFIGURED_URL);
 }
 
 export function resolveFaceAnalysisApiUrl() {
-  if (CONFIGURED_FACE_ANALYSIS_URL && CONFIGURED_FACE_ANALYSIS_URL.toLowerCase() !== 'auto') {
-    return normalizeUrl(CONFIGURED_FACE_ANALYSIS_URL);
-  }
-
-  const expoHost = Constants.expoConfig?.hostUri?.match(/^([^:]+)/)?.[1];
-  if (expoHost) return `http://${expoHost}:${FACE_ANALYSIS_API_PORT}`;
-
-  const fallbackHost = Platform.OS === 'android' ? '10.0.2.2' : 'localhost';
-  return `http://${fallbackHost}:${FACE_ANALYSIS_API_PORT}`;
+  if (!CONFIGURED_FACE_ANALYSIS_URL) throw new Error('EXPO_PUBLIC_FACE_ANALYSIS_API_URL is missing from the Expo environment.');
+  return normalizeUrl(CONFIGURED_FACE_ANALYSIS_URL);
 }
 
 export const API_URL = resolveApiUrl();

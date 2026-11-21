@@ -4,8 +4,8 @@ function philippineDateTime(date) {
 }
 async function ensureAppointmentSchema(db) {
   await db.execute(`CREATE TABLE IF NOT EXISTS appointment_tracking (
-    booking_id BIGINT UNSIGNED NOT NULL, appointment_at DATETIME NOT NULL,
-    arrived_at DATETIME NULL, reminder_sent BOOLEAN NOT NULL DEFAULT FALSE,
+    booking_id BIGINT NOT NULL, appointment_at TIMESTAMP NOT NULL,
+    arrived_at TIMESTAMP NULL, reminder_sent BOOLEAN NOT NULL DEFAULT FALSE,
     due_sent BOOLEAN NOT NULL DEFAULT FALSE, auto_cancelled BOOLEAN NOT NULL DEFAULT FALSE,
     PRIMARY KEY (booking_id, appointment_at),
     FOREIGN KEY (booking_id) REFERENCES bookings(id) ON DELETE CASCADE)`);

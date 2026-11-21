@@ -13,21 +13,45 @@ services:
         value: 22
       - key: PORT
         value: 10000
-      - key: DB_HOST
+      - key: SUPABASE_DB_URL
         sync: false
-      - key: DB_PORT
-        value: 3306
-      - key: DB_USER
-        sync: false
-      - key: DB_PASSWORD
-        sync: false
-      - key: DB_NAME
-        sync: false
+      - key: SUPABASE_DB_SSL
+        value: true
+      - key: DB_POOL_SIZE
+        value: 10
       - key: CORS_ORIGIN
         sync: false
       - key: JWT_SECRET
         generateValue: true
-      - key: FACE_ANALYSIS_URL
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_ANALYSIS_MODEL
+        value: gemini-3.8-flash
+
+  - type: web
+    name: facefit-face-analysis
+    runtime: docker
+    dockerfilePath: ./php-api/Dockerfile
+    dockerContext: ./php-api
+    healthCheckPath: /health.php
+    autoDeploy: true
+    envVars:
+      - key: PORT
+        value: 10000
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_ANALYSIS_MODEL
+        value: gemini-3.8-flash
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: JWT_SECRET
+        fromService:
+          type: web
+          name: facefit-api
+          envVarKey: JWT_SECRET
+      - key: CORS_ORIGIN
         sync: false
 
   - type: web

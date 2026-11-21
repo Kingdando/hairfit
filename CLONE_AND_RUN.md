@@ -45,9 +45,9 @@ macOS, Linux, or Git Bash:
 cp server/.env.example server/.env
 ```
 
-Open `server/.env` and enter your MySQL username and password. Change `JWT_SECRET` to a long, random value. The default API port is `3000`.
+Open `server/.env` and set the Supabase Postgres connection URL, `JWT_SECRET`, CORS origin, and deployed face-analysis URL. The default API port is `3000`.
 
-Make sure MySQL or MariaDB is running, then install the server packages and create the database:
+Install the server packages and initialize the Supabase schema:
 
 ```bash
 cd server
@@ -74,7 +74,7 @@ macOS, Linux, or Git Bash:
 cp .env.example .env
 ```
 
-The default `EXPO_PUBLIC_API_URL=auto` setting lets Expo Go use the computer that serves the app. Then install and start the app:
+Set `EXPO_PUBLIC_API_URL` and `EXPO_PUBLIC_FACE_ANALYSIS_API_URL` to the deployed HTTPS services, then install and start the app:
 
 ```bash
 npm install
@@ -92,14 +92,6 @@ After Expo starts, you can:
 - Press `i` to open an iOS simulator on macOS.
 - Press `w` to open the web version.
 
-The computer and physical phone must be connected to the same Wi-Fi network. If automatic API detection does not work, find the computer's local IPv4 address and update `.env`:
-
-```env
-EXPO_PUBLIC_API_URL=http://192.168.1.10:3000
-```
-
-Replace `192.168.1.10` with the computer's actual IPv4 address, then stop and restart Expo.
-
 ## Daily startup
 
 After the first setup, start each required service in a separate terminal:
@@ -113,20 +105,16 @@ npm run dev
 cd FaceFit
 npm start
 
-# Terminal 3: PHP face-analysis API (optional until you use the scanner)
-cd FaceFit/php-api
-php -S 0.0.0.0:8000 -t public
 ```
 
-Configure `php-api/.env` from `php-api/.env.example` with your Gemini API key. For signed-in scan-history support, also set the same `JWT_SECRET` and MySQL connection values used by the existing API. The app's `EXPO_PUBLIC_FACE_ANALYSIS_API_URL` defaults to `auto` and uses port `8000`; set it to the deployed PHP API URL for production.
+Configure the deployed face-analysis service from `php-api/.env.example` with its Gemini and Supabase values. The app's `EXPO_PUBLIC_FACE_ANALYSIS_API_URL` must point to that deployed service.
 
 ## Common problems
 
-- **Expo cannot connect to the API:** Confirm the phone and computer use the same Wi-Fi, allow Node.js through the firewall, and use the computer's IPv4 address in `.env`.
-- **Face scan cannot connect:** Confirm the PHP server is running on port `8000`, allow PHP through the firewall, and set `EXPO_PUBLIC_FACE_ANALYSIS_API_URL` to the computer's reachable address if automatic detection fails.
-- **Database connection fails:** Confirm MySQL is running and the `DB_HOST`, `DB_PORT`, `DB_USER`, and `DB_PASSWORD` values in `server/.env` are correct.
-- **Port already in use:** Change `PORT` in `server/.env` and `EXPO_PUBLIC_API_PORT` in `.env` to the same available port.
-- **PHP port already in use:** Start PHP with another port and set `EXPO_PUBLIC_FACE_ANALYSIS_API_PORT` in `.env` to match.
+- **Expo cannot connect to the API:** Confirm both `EXPO_PUBLIC_*_URL` values point to reachable HTTPS services and restart Expo after changing `.env`.
+- **Face scan cannot connect:** Confirm the deployed face-analysis service is healthy and that `EXPO_PUBLIC_FACE_ANALYSIS_API_URL` is correct.
+- **Database connection fails:** Confirm `SUPABASE_DB_URL` and `SUPABASE_DB_SSL` in the API service are correct.
+- **Port already in use:** Change `PORT` in `server/.env` and update the deployed service configuration.
 - **Dependencies behave unexpectedly:** Stop the running process, run `npm install` again in both `FaceFit` and `FaceFit/server`, then restart the services.
 
 ## Booking deposits and schedule requests
