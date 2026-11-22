@@ -468,8 +468,23 @@ app.post('/api/owner/salon', authenticate, async (request, response, next) => {
   }
   let logoPath = null;
   try {
-    const [existing] = await pool.execute('SELECT id FROM salons WHERE owner_id = ? LIMIT 1', [request.user.sub]);
-    if (existing[0]) return response.status(409).json({ error: 'This owner already has a salon.' });
+    const [existing] = await pool.execute(
+      `SELECT id, name, address, city, latitude, longitude, profile_image_path AS profileImageUrl
+       FROM salons WHERE owner_id = ? LIMIT 1`,
+      [request.user.sub],
+    );
+    if (existing[0]) {
+      let profileImageUrl = existing[0].profileImageUrl;
+      await pool.execute(
+        `UPDATE salons SET name = ?, address = ?, city = ?, latitude = ?, longitude = ?, is_active = TRUE WHERE id = ?`,
+        [name, address, city, latitude, longitude, existing[0].id],
+      );
+      if (typeof logoData === 'string') {
+        profileImageUrl = await storeManagedImage(logoData, 'salon', request.user.sub, existing[0].id);
+        await pool.execute('UPDATE salons SET profile_image_path = ? WHERE id = ?', [profileImageUrl, existing[0].id]);
+      }
+      return response.json({ data: { id: existing[0].id, name, address, city, latitude, longitude, profileImageUrl } });
+    }
     const [unclaimed] = await pool.execute('SELECT id FROM salons WHERE owner_id IS NULL AND LOWER(name) = LOWER(?) LIMIT 1', [name]);
     let salonId = unclaimed[0]?.id;
     if (salonId) {
