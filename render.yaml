@@ -21,6 +21,8 @@ services:
         value: 10
       - key: CORS_ORIGIN
         sync: false
+      - key: FACE_ANALYSIS_INTERNAL_URL
+        sync: false
       - key: JWT_SECRET
         generateValue: true
       - key: GEMINI_API_KEY
@@ -62,8 +64,6 @@ services:
     autoDeploy: true
     envVars:
       - key: EXPO_PUBLIC_API_URL
-        sync: false
-      - key: EXPO_PUBLIC_FACE_ANALYSIS_API_URL
         sync: false
     routes:
       - type: rewrite

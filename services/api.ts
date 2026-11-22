@@ -1,4 +1,4 @@
-import { API_URL, FACE_ANALYSIS_API_URL } from './api-config';
+import { API_URL } from './api-config';
 
 export type Salon = {
   id: number;
@@ -351,13 +351,13 @@ export async function updateProfile(token: string, input: { fullName: string; em
 export async function analyzeFace(token: string | null, imageData: string, stylePreference: 'men' | 'women' = 'men', hairLength?: string | null) {
   let response: Response;
   try {
-    response = await fetch(`${FACE_ANALYSIS_API_URL}/api/face-analysis.php`, {
+    response = await fetch(`${API_URL}/api/face-analysis.php`, {
       method: 'POST',
       headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), 'Content-Type': 'application/json' },
       body: JSON.stringify({ imageData, stylePreference, ...(hairLength ? { hairLength } : {}) }),
     });
   } catch {
-    throw new Error(`Cannot connect to the PHP face-analysis API at ${FACE_ANALYSIS_API_URL}. Start the PHP API and keep this device on the same Wi-Fi network.`);
+    throw new Error(`Cannot connect to the FaceFit API at ${API_URL}. Make sure the Node API and face-analysis service are running.`);
   }
   const result = await response.json().catch(() => null);
   if (!response.ok) throw new Error(result?.error || `Face analysis failed (${response.status})`);

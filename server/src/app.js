@@ -23,6 +23,21 @@ app.use(cors({ origin: allowedOrigins.includes('*') ? true : allowedOrigins }));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
+app.post('/api/face-analysis.php', async (request, response, next) => {
+  const targetUrl = process.env.FACE_ANALYSIS_INTERNAL_URL;
+  if (!targetUrl) return response.status(503).json({ error: 'Face-analysis service is not configured.' });
+  try {
+    const headers = { 'Content-Type': 'application/json' };
+    const authorization = request.get('authorization');
+    if (authorization) headers.Authorization = authorization;
+    const upstream = await fetch(targetUrl, { method: 'POST', headers, body: JSON.stringify(request.body || {}) });
+    const body = await upstream.text();
+    response.status(upstream.status).type('application/json').send(body);
+  } catch (error) {
+    next(error);
+  }
+});
+
 require('./booking-routes').registerBookingRoutes(app, pool, authenticate);
 require('./stylist-routes').registerStylistRoutes(app, pool, authenticate);
 require('./stylist-workspace-routes').registerStylistWorkspaceRoutes(app, pool, authenticate);

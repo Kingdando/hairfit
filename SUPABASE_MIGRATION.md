@@ -1,6 +1,6 @@
 # Supabase migration
 
-The API keeps the existing `/api/*` contract and uses Supabase Postgres exclusively through `SUPABASE_DB_URL`. The runtime no longer has a local MySQL fallback.
+The API keeps the existing `/api/*` contract and uses Supabase Postgres exclusively through `SUPABASE_DB_URL`. The runtime no longer has a local MySQL fallback. The Expo app exposes one public API URL; Node proxies face analysis to the PHP service.
 
 ## One-time migration
 
