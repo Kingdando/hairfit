@@ -296,6 +296,9 @@ async function apiPost<T>(path: string, body: object): Promise<T> {
   });
   const result = await response.json().catch(() => null);
   if (!response.ok) throw new Error(result?.error || `API request failed (${response.status})`);
+  if (!result || typeof result !== 'object') {
+    throw new Error(`The API returned an invalid response for ${path}. Check EXPO_PUBLIC_API_URL and redeploy the web app.`);
+  }
   return result as T;
 }
 
@@ -382,6 +385,9 @@ export async function createOwnerSalon(token: string, input: { name: string; add
   });
   const result = await response.json().catch(() => null);
   if (!response.ok) throw new Error(result?.error || `API request failed (${response.status})`);
+  if (!result || typeof result !== 'object' || !('data' in result)) {
+    throw new Error('The API returned an invalid salon response. Check EXPO_PUBLIC_API_URL and redeploy the web app.');
+  }
   return result.data;
 }
 
