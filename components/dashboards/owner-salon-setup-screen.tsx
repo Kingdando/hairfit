@@ -17,18 +17,35 @@ import { createOwnerSalon } from '@/services/api';
 type Props = {
   token: string;
   defaultName: string;
+  defaultAddress?: string;
+  defaultCity?: string;
+  defaultLatitude?: string;
+  defaultLongitude?: string;
+  defaultLogoUri?: string | null;
+  defaultLogoData?: string;
   onComplete: () => void;
   onLogout: () => void;
 };
 
-export function OwnerSalonSetupScreen({ token, defaultName, onComplete, onLogout }: Props) {
+export function OwnerSalonSetupScreen({
+  token,
+  defaultName,
+  defaultAddress = '',
+  defaultCity = 'Nasugbu',
+  defaultLatitude = '14.0667',
+  defaultLongitude = '120.6333',
+  defaultLogoUri = null,
+  defaultLogoData,
+  onComplete,
+  onLogout,
+}: Props) {
   const [name, setName] = useState(defaultName);
-  const [address, setAddress] = useState('');
-  const [city, setCity] = useState('Nasugbu');
-  const [latitude, setLatitude] = useState('14.0667');
-  const [longitude, setLongitude] = useState('120.6333');
-  const [logoUri, setLogoUri] = useState<string | null>(null);
-  const [logoData, setLogoData] = useState<string | undefined>();
+  const [address, setAddress] = useState(defaultAddress);
+  const [city, setCity] = useState(defaultCity);
+  const [latitude, setLatitude] = useState(defaultLatitude);
+  const [longitude, setLongitude] = useState(defaultLongitude);
+  const [logoUri, setLogoUri] = useState<string | null>(defaultLogoUri);
+  const [logoData, setLogoData] = useState<string | undefined>(defaultLogoData);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 

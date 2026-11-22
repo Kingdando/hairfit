@@ -245,6 +245,7 @@ const C = {
 // Bump this version when the consent terms materially change.
 const CONSENT_VERSION = 1;
 const consentStorageKey = (userId: number) => `facefit:consent:${userId}`;
+const AUTH_SESSION_STORAGE_KEY = "facefit:auth-session";
 const HAIRSTYLE_WORDS = new Set("hair hairstyle haircut cut style styles fringe bang bangs bob pixie fade taper tapered layer layers layered curly curl curls wavy wave waves straight textured texture length short long medium undercut quiff crop braid braids ponytail bun shag mullet crew afro locs dreadlocks part volume low high mid skin side swept side-swept classic modern clean neat trim natural simple messy maintenance low-maintenance wolf butterfly curtain french caesar pompadour slicked back slicked-back mohawk faux hawk faux-hawk buzz crewcut crew-cut blowout shoulder shoulder-length chin chin-length mid-length blunt wispy asymmetrical black brown blonde gray red face shape round oval square heart diamond oblong".toLowerCase().split(/\s+/));
 const HAIRSTYLE_DESCRIPTORS = new Set("professional elegant edgy bold soft casual formal trendy stylish flattering suitable easy effortless low-maintenance lightweight thick thin fine dense natural youthful mature polished feminine masculine versatile office wedding daily everyday messy neat sharp subtle dramatic voluminous face facial features".split(/\s+/));
 const PROMPT_CONNECTORS = new Set("a an the with for me i want would like prefer need get looking look try please can you suggest recommend give show find that suits my keep it to and or but very more less of in on will without while as something make makes work good".split(/\s+/));
@@ -1805,6 +1806,7 @@ export default function FaceFitPrototype() {
   const { width } = useWindowDimensions();
   const isDesktopWeb = Platform.OS === "web" && width >= 900;
   const [screen, setScreen] = useState<Screen>("splash");
+  const [sessionHydrating, setSessionHydrating] = useState(true);
   const [faceAnalysisConsent, setFaceAnalysisConsent] = useState(false);
   const [locationConsent, setLocationConsent] = useState(false);
   const [consentReturnScreen, setConsentReturnScreen] = useState<"login" | "signup">("signup");
@@ -1978,11 +1980,21 @@ export default function FaceFitPrototype() {
     });
   const logout = () =>
     requestLogout(() => {
+      void AsyncStorage.removeItem(AUTH_SESSION_STORAGE_KEY).catch(() => {});
       setAuthUser(null);
       setAuthToken(null);
       setUserProfile(null);
       setOwnerDashboard(null);
+      setOwnerDashboardError(null);
       setOwnerManagement(null);
+      setOwnerSalonRecoveryAttempted(false);
+      setSalonName("");
+      setSalonAddress("");
+      setSalonCity("Nasugbu");
+      setSalonLatitude("14.0667");
+      setSalonLongitude("120.6333");
+      setSalonLogoUri(null);
+      setSalonLogoData(undefined);
       setIsGuestAccount(false);
       setScreen("login");
     });
@@ -2026,11 +2038,87 @@ export default function FaceFitPrototype() {
   ] as Screen[];
 
   useEffect(() => {
-    if (screen === "splash") {
+    if (screen === "splash" && !sessionHydrating) {
       const t = setTimeout(() => setScreen("onboarding"), 1400);
       return () => clearTimeout(t);
     }
-  }, [screen]);
+  }, [screen, sessionHydrating]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const restoreSession = async () => {
+      try {
+        const stored = await AsyncStorage.getItem(AUTH_SESSION_STORAGE_KEY);
+        if (!stored) return;
+
+        const parsed = JSON.parse(stored) as { token?: unknown; user?: AuthUser };
+        if (typeof parsed.token !== "string" || !parsed.token || !parsed.user?.id || !parsed.user.role) {
+          await AsyncStorage.removeItem(AUTH_SESSION_STORAGE_KEY);
+          return;
+        }
+
+        let profile: UserProfile | null = null;
+        let sessionInvalid = false;
+        try {
+          profile = await getProfile(parsed.token);
+        } catch (error) {
+          sessionInvalid = (error as Error & { status?: number }).status === 401;
+          // Keep the session when profile enrichment is temporarily unavailable.
+        }
+        if (sessionInvalid) {
+          await AsyncStorage.removeItem(AUTH_SESSION_STORAGE_KEY);
+          return;
+        }
+        if (cancelled) return;
+
+        const user = profile || parsed.user;
+        let hasAcceptedTerms = false;
+        if (user.role === "customer") {
+          try {
+            const consent = await AsyncStorage.getItem(consentStorageKey(user.id));
+            if (consent) {
+              const saved = JSON.parse(consent) as { version?: number; faceAnalysis?: boolean; location?: boolean };
+              hasAcceptedTerms = saved.version === CONSENT_VERSION && saved.faceAnalysis === true && saved.location === true;
+            }
+          } catch {
+            // Missing or malformed consent means the customer must review it again.
+          }
+        }
+        if (cancelled) return;
+
+        setAuthUser(user);
+        setAuthToken(parsed.token);
+        setUserProfile(profile);
+        setIsGuestAccount(false);
+        setGuestScanUsed(false);
+        setFaceAnalysisConsent(hasAcceptedTerms);
+        setLocationConsent(hasAcceptedTerms);
+        setConsentReturnScreen("login");
+        if (profile?.stylePreference === "men" || profile?.stylePreference === "women") {
+          setStylePreference(profile.stylePreference);
+        }
+        setScreen(
+          user.role === "owner"
+            ? "owner-dashboard"
+            : user.role === "stylist"
+              ? "stylist-dashboard"
+              : hasAcceptedTerms
+                ? "home"
+                : "consent",
+        );
+      } catch {
+        await AsyncStorage.removeItem(AUTH_SESSION_STORAGE_KEY).catch(() => {});
+      } finally {
+        if (!cancelled) setSessionHydrating(false);
+      }
+    };
+
+    void restoreSession();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const loadSalons = useCallback(async () => {
     setSalonsLoading(true);
     setSalonsError(null);
@@ -2796,6 +2884,7 @@ export default function FaceFitPrototype() {
     if (authLoading) return;
     setAuthLoading(true);
     setAuthError(null);
+    setOwnerSalonRecoveryAttempted(false);
     try {
       setOwnerTab("dashboard");
       setOwnerScrollRequest(previous => ({ tab: "dashboard", id: previous.id + 1 }));
@@ -2853,6 +2942,14 @@ export default function FaceFitPrototype() {
       }
       setAuthUser(result.user);
       setAuthToken(result.token);
+      try {
+        await AsyncStorage.setItem(
+          AUTH_SESSION_STORAGE_KEY,
+          JSON.stringify({ token: result.token, user: result.user }),
+        );
+      } catch {
+        // The current session remains usable even if device storage is unavailable.
+      }
       setIsGuestAccount(false);
       setGuestScanUsed(false);
       setUserProfile(authenticatedProfile);
@@ -6553,6 +6650,12 @@ export default function FaceFitPrototype() {
             <OwnerSalonSetupScreen
               token={authToken}
               defaultName={authUser?.fullName || ""}
+              defaultAddress={salonAddress}
+              defaultCity={salonCity}
+              defaultLatitude={salonLatitude}
+              defaultLongitude={salonLongitude}
+              defaultLogoUri={salonLogoUri}
+              defaultLogoData={salonLogoData}
               onComplete={() => {
                 setOwnerDashboardError(null);
                 void Promise.all([loadOwnerDashboard(), loadSalons()]);

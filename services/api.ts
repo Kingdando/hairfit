@@ -336,7 +336,11 @@ export async function getProfile(token: string) {
     headers: { Authorization: `Bearer ${token}` },
   });
   const result = await response.json().catch(() => null);
-  if (!response.ok) throw new Error(result?.error || `API request failed (${response.status})`);
+  if (!response.ok) {
+    const error = new Error(result?.error || `API request failed (${response.status})`) as Error & { status?: number };
+    error.status = response.status;
+    throw error;
+  }
   return (result as { data: UserProfile }).data;
 }
 
