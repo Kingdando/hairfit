@@ -383,7 +383,7 @@ export function OwnerDashboardScreen({ scrollRequest, onSectionChange, dashboard
   const metrics = [
     { label: 'Today', value: String(dashboard?.todayBookings ?? 0), caption: 'appointments', icon: 'calendar-clear-outline' as const, tone: styles.metricRose },
     { label: 'Pending', value: String(dashboard?.pendingBookings ?? 0), caption: 'need attention', icon: 'time-outline' as const, tone: styles.metricGold },
-    { label: 'Rating', value: (dashboard?.rating ?? 0).toFixed(1), caption: `${dashboard?.reviewCount ?? 0} reviews`, icon: 'star-outline' as const, tone: styles.metricPurple },
+    { label: 'Rating', value: Number(dashboard?.rating ?? 0).toFixed(1), caption: `${dashboard?.reviewCount ?? 0} reviews`, icon: 'star-outline' as const, tone: styles.metricPurple },
     { label: 'Team', value: String(dashboard?.availableStaff ?? 0), caption: 'available staff', icon: 'people-outline' as const, tone: styles.metricGreen },
   ];
 
