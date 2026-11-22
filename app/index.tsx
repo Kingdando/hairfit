@@ -5602,7 +5602,7 @@ export default function FaceFitPrototype() {
             ) : (
               <View style={s.profileAvatar}>
                 <Text style={s.profileInitial}>
-                  {authUser?.fullName.charAt(0).toUpperCase() || "?"}
+                  {authUser?.fullName?.charAt(0).toUpperCase() || "?"}
                 </Text>
               </View>
             )}

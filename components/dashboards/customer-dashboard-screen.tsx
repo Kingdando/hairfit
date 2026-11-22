@@ -28,7 +28,7 @@ export function CustomerDashboardScreen({ user, salons, favoriteSalonIds, saving
   const wide = width >= 1100;
   return <>
     <View style={styles.topRow}>
-      <View style={styles.grow}><Text numberOfLines={1} style={[styles.greeting, compact && styles.greetingCompact]}>Hello, {user?.fullName.split(' ')[0] || 'there'}</Text><Text style={styles.body}>Ready for a fresh look?</Text></View>
+      <View style={styles.grow}><Text numberOfLines={1} style={[styles.greeting, compact && styles.greetingCompact]}>Hello, {user?.fullName?.split(' ')[0] || 'there'}</Text><Text style={styles.body}>Ready for a fresh look?</Text></View>
       <Pressable accessibilityRole="button" accessibilityLabel={`${unreadNotifications} unread notifications`} onPress={onNotifications} style={styles.avatar}>
         <Ionicons name="notifications-outline" size={21} color={colors.roseDark} />
         {unreadNotifications > 0 && <View style={styles.badge}><Text style={styles.badgeText}>{unreadNotifications > 99 ? '99+' : unreadNotifications}</Text></View>}
