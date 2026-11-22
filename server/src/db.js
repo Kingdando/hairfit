@@ -62,7 +62,11 @@ function addReturning(sql) {
 }
 function postgresResult(result) {
   const rows = result.rows || [];
-  return [rows, { affectedRows: result.rowCount || 0, insertId: String(result.command).toUpperCase() === 'INSERT' && rows[0]?.id != null ? Number(rows[0].id) : undefined }];
+  if (result.command === 'SELECT') return [rows, undefined];
+  return [{
+    affectedRows: result.rowCount || 0,
+    insertId: result.command === 'INSERT' && rows[0]?.id != null ? Number(rows[0].id) : undefined,
+  }, undefined];
 }
 function makePostgresClient(client) {
   return {
@@ -81,4 +85,5 @@ module.exports = {
   async query(sql, values = []) { return pool.query(translateSql(sql), values); },
   async getConnection() { return makePostgresClient(await pool.connect()); },
   async end() { await pool.end(); },
+  postgresResult,
 };
