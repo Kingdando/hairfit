@@ -44,7 +44,7 @@ CORS_ORIGIN           final facefit-web URL
 FACE_ANALYSIS_INTERNAL_URL  PHP service URL ending in `/api/face-analysis.php`
 ```
 
-`PORT` is supplied by Render. The pre-deploy command runs `npm run db:init` and creates the Supabase schema before the API starts.
+`PORT` is supplied by Render. The free-service start command runs `npm run db:init && npm start`; the schema initializer is idempotent and creates the Supabase schema before the API starts.
 
 ### `facefit-face-analysis`
 

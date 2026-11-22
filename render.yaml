@@ -2,10 +2,10 @@ services:
   - type: web
     name: facefit-api
     runtime: node
+    plan: free
     rootDir: server
     buildCommand: npm ci
-    preDeployCommand: npm run db:init
-    startCommand: npm start
+    startCommand: npm run db:init && npm start
     healthCheckPath: /api/health
     autoDeploy: true
     envVars:
@@ -33,6 +33,7 @@ services:
   - type: web
     name: facefit-face-analysis
     runtime: docker
+    plan: free
     dockerfilePath: ./php-api/Dockerfile
     dockerContext: ./php-api
     healthCheckPath: /health.php
