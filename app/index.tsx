@@ -1855,6 +1855,7 @@ export default function FaceFitPrototype() {
   const [ownerDashboard, setOwnerDashboard] = useState<OwnerDashboard | null>(
     null,
   );
+  const ownerDashboardRequestRef = useRef(0);
   const [ownerDashboardLoading, setOwnerDashboardLoading] = useState(false);
   const [ownerDashboardError, setOwnerDashboardError] = useState<string | null>(
     null,
@@ -1981,6 +1982,7 @@ export default function FaceFitPrototype() {
   const logout = () =>
     requestLogout(() => {
       void AsyncStorage.removeItem(AUTH_SESSION_STORAGE_KEY).catch(() => {});
+      ownerDashboardRequestRef.current += 1;
       setAuthUser(null);
       setAuthToken(null);
       setUserProfile(null);
@@ -2219,18 +2221,24 @@ export default function FaceFitPrototype() {
   }, [loadProfile, screen]);
   const loadOwnerDashboard = useCallback(async () => {
     if (!authToken || authUser?.role !== "owner") return;
+    const requestId = ++ownerDashboardRequestRef.current;
     setOwnerDashboardLoading(true);
     setOwnerDashboardError(null);
     try {
-      setOwnerDashboard(await getOwnerDashboard(authToken));
+      const dashboard = await getOwnerDashboard(authToken);
+      if (requestId !== ownerDashboardRequestRef.current) return;
+      setOwnerDashboard(dashboard);
     } catch (error) {
+      if (requestId !== ownerDashboardRequestRef.current) return;
       setOwnerDashboardError(
         error instanceof Error
           ? error.message
           : "Unable to load the salon dashboard.",
       );
     } finally {
-      setOwnerDashboardLoading(false);
+      if (requestId === ownerDashboardRequestRef.current) {
+        setOwnerDashboardLoading(false);
+      }
     }
   }, [authToken, authUser?.role]);
   useEffect(() => {
